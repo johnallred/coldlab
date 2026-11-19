@@ -14,13 +14,43 @@ Parameters:
     Type: String
     Default: main
     Description: Trust is scoped to this one branch. Widen deliberately, not by default.
+  SubjectClaim:
+    Type: String
+    Default: "repo:johnallred@7398042/coldlab@1463740861:ref:refs/heads/main"
+    Description: >
+      The exact `sub` claim GitHub sends, matched with StringEquals.
+
+      Note the numeric ids. GitHub can issue the subject in an immutable form
+      that appends the owner id and the repository id to their names, so the
+      claim reads `repo:owner@1234/repo@5678:ref:refs/heads/main` rather than
+      `repo:owner/repo:ref:refs/heads/main`. That is the safer form: deleting a
+      repository and recreating it under the same name produces a new id, so
+      the recreated repository does not inherit this role's access.
+
+      It is also invisible from the AWS side. A trust policy written against
+      the plain names looks entirely correct and rejects every token. If this
+      role stops being assumable, print the claim in the workflow and compare,
+      rather than re-reading the policy.
+
   CreateOIDCProvider:
     Type: String
     Default: "yes"
     AllowedValues: ["yes", "no"]
     Description: >
-      Set to "no" if this account already has a GitHub OIDC provider. A second
-      provider for the same URL fails with EntityAlreadyExists.
+      Set to "no" only when some *other* stack already owns a GitHub OIDC
+      provider in this account. A second provider for the same URL fails with
+      EntityAlreadyExists.
+
+      Once this stack has created the provider, never flip this to "no" on an
+      update. CloudFormation owns the resource, so flipping the condition
+      deletes it, and the role is left trusting a provider ARN with nothing
+      behind it. STS then rejects every token with "The web identity token
+      provided could not be validated", which reads like a claims problem and
+      is not one. An empty `aws iam list-open-id-connect-providers` is the tell.
+
+      `aws cloudformation deploy` re-sends template defaults for any parameter
+      you omit, so state every parameter on every deploy rather than trusting
+      the previous value to persist.
 
 Conditions:
   ShouldCreateProvider: !Equals [!Ref CreateOIDCProvider, "yes"]
@@ -58,7 +88,7 @@ Resources:
                 # Exact match, not StringLike. A wildcard such as
                 # repo:owner/*:* would let any repository you own assume this
                 # role, which is the standard OIDC misconfiguration.
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}"
+                token.actions.githubusercontent.com:sub: !Ref SubjectClaim
       # No policies in Phase 0. sts:GetCallerIdentity needs none, so the smoke
       # test proves the trust relationship works and nothing more.
       #

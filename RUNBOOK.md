@@ -118,6 +118,10 @@ aws iam list-open-id-connect-providers
 If you see one containing `token.actions.githubusercontent.com`, add
 `CreateOIDCProvider=no` to the command below. Otherwise leave it as is.
 
+That choice is made **once**, on the first deploy, and then never changed. If
+this stack created the provider, a later deploy passing `CreateOIDCProvider=no`
+deletes it. See the troubleshooting entry on tokens that cannot be validated.
+
 ```bash
 aws cloudformation deploy \
   --template-file bootstrap/oidc-role.yaml \
@@ -138,11 +142,20 @@ It should look like `arn:aws:iam::637551066958:role/coldlab-ci-coldlab`.
 
 ## Step 5. Tell GitHub about the role
 
-With `gh`:
+With `gh`, reading the ARN straight out of the stack so there is nothing to
+mistype:
 
 ```bash
-gh variable set AWS_ROLE_ARN --body "PASTE_THE_ARN_HERE"
+gh variable set AWS_ROLE_ARN --body "$(aws cloudformation describe-stacks \
+  --stack-name coldlab-oidc --region us-east-2 \
+  --query 'Stacks[0].Outputs[?OutputKey==`CIRoleArn`].OutputValue' --output text)"
+
+gh variable get AWS_ROLE_ARN
 ```
+
+The second line is the check. It must end in `role/coldlab-ci-coldlab`. A
+truncated or wrong ARN here produces exactly the same failure as a wrong trust
+policy, and you will spend the next hour looking at the policy.
 
 Without `gh`: open `https://github.com/johnallred/coldlab/settings/variables/actions`,
 click **New repository variable**, name it `AWS_ROLE_ARN`, paste the ARN.
@@ -197,39 +210,119 @@ It will show you the IAM changes and ask for confirmation. Say yes.
 ## Step 9. Run the lab by hand, once
 
 This is the thing the harness will automate later. Doing it once by hand is how
-you find out whether the lab actually teaches what it claims.
+you find out whether the lab teaches what it claims. The first real run found
+two things that no amount of reading the template would have found, and both
+are written into this step.
+
+First put the stack's outputs in your shell, so nothing below needs editing by
+hand. The earlier version of this step said `PASTE_QueueUrl_HERE`, and a
+placeholder you have to edit is a placeholder someone will run verbatim:
+
+```bash
+export Q=$(aws cloudformation describe-stacks --stack-name ColdlabSqsRetry --region us-east-2 \
+  --query 'Stacks[0].Outputs[?OutputKey==`QueueUrl`].OutputValue' --output text)
+export DLQ=$(aws cloudformation describe-stacks --stack-name ColdlabSqsRetry --region us-east-2 \
+  --query 'Stacks[0].Outputs[?OutputKey==`DeadLetterUrl`].OutputValue' --output text)
+export BUCKET=$(aws cloudformation describe-stacks --stack-name ColdlabSqsRetry --region us-east-2 \
+  --query 'Stacks[0].Outputs[?OutputKey==`LandingBucket`].OutputValue' --output text)
+echo "$Q"; echo "$DLQ"; echo "$BUCKET"
+```
+
+Three non-empty lines before going on. They live only in this terminal window;
+a new window needs them again.
 
 Send one message that will always fail:
 
 ```bash
-aws sqs send-message --region us-east-2 \
-  --queue-url "PASTE_QueueUrl_HERE" \
+aws sqs send-message --region us-east-2 --queue-url "$Q" \
   --message-body '{"file":"invoice-8812.csv","fail_until":99}'
 ```
 
-Wait about two minutes, then look in the dead-letter queue:
+That returns a `MessageId`. Watch the worker fail, which is better evidence
+than inferring it from the dead-letter queue because it distinguishes the
+failure this lab teaches from an unrelated one such as a missing permission:
 
 ```bash
-aws sqs receive-message --region us-east-2 \
-  --queue-url "PASTE_DeadLetterUrl_HERE" \
-  --attribute-names ApproximateReceiveCount
+export W=$(aws logs describe-log-groups --region us-east-2 \
+  --query 'logGroups[?contains(logGroupName, `Worker`)].logGroupName' --output text)
+aws logs tail "$W" --region us-east-2 --since 10m
 ```
 
-**Check:** the message is there, and `ApproximateReceiveCount` is `3`. That is
-the lab's observable result: three deliveries, then the dead-letter queue.
+Three invocations, each logging a 503 from the partner and the backoff it is
+about to apply. CloudWatch creates the log group on first invocation, so
+`ResourceNotFoundException` here means the function has not run yet, not that
+logging is broken. Omit `--follow` unless you want the terminal held open.
 
-Now the success path. Send one that recovers on the third attempt:
+### The timing, which is the lab's real lesson
+
+It is not the queue's visibility timeout, and this is the first thing the hand
+run corrected.
+
+The worker calls `ChangeMessageVisibility` on every failure with its own
+exponential backoff: 15s, then 30s, then 60s. The queue's 180-second timeout is
+only the *initial* lease, the time the worker has to finish before SQS assumes
+it died. The moment the worker fails deliberately it shortens that lease to its
+own backoff. So deliveries land at roughly t=0, t=15 and t=45, and the redrive
+happens when a fourth receive pushes the count past `maxReceiveCount`, at about
+t=105.
+
+Measured on the first real run: attempts at 22:04:31, 22:04:47 and 22:05:17, so
+the message reached the dead-letter queue at about 22:06:17. **About two
+minutes, and the 180 in the template is a red herring for this question.**
 
 ```bash
-aws sqs send-message --region us-east-2 \
-  --queue-url "PASTE_QueueUrl_HERE" \
+sleep 150
+```
+
+### Then read the dead-letter queue, carefully
+
+Ask how many messages are there before trying to read one:
+
+```bash
+aws sqs get-queue-attributes --region us-east-2 --queue-url "$DLQ" \
+  --attribute-names ApproximateNumberOfMessages
+
+aws sqs receive-message --region us-east-2 --queue-url "$DLQ" \
+  --attribute-names All --wait-time-seconds 20 --max-number-of-messages 10
+```
+
+**`--wait-time-seconds 20` is not optional**, and this is the second thing the
+hand run found. A default `receive-message` is a short poll: it samples a
+subset of the servers holding the queue and returns whatever that subset has,
+so a queue holding one or two messages very often answers with nothing at all.
+An empty short poll is not evidence the message is absent. The first hand run
+of this lab read an empty dead-letter queue and concluded the lab was broken
+when the message had been sitting there for twenty minutes.
+
+Every assertion the harness makes about the dead-letter queue therefore has to
+long poll, or read the queue depth, or both. A check that reports absence when
+it merely failed to look is worse than no check, and it is the exact shape of
+the flake this project exists to measure.
+
+**Check:** the message is in the dead-letter queue, and it never reached the
+bucket. That is the lab's observable result.
+
+`ApproximateReceiveCount` on this read is a separate question, and one to
+measure rather than assume. The count is maintained per queue, so a redriven
+message may report the receives it accumulated on the source queue or may start
+again from 1 on the dead-letter queue. Record what you actually see and write
+that into `expected.yaml`. An assertion copied from an assumption is worse than
+no assertion.
+
+### The success path
+
+Send one that recovers on the third attempt:
+
+```bash
+aws sqs send-message --region us-east-2 --queue-url "$Q" \
   --message-body '{"file":"invoice-9001.csv","fail_until":3}'
 ```
 
-**Check:** after a minute or two the file is in the bucket:
+**Check:** the file is in the bucket. Third attempt at about t=45, so:
 
 ```bash
-aws s3 ls "s3://PASTE_LandingBucket_HERE/landed/"
+sleep 90
+aws s3 ls "s3://$BUCKET/landed/"
 ```
 
 ## Step 10. Tear it down, and verify
@@ -238,24 +331,61 @@ aws s3 ls "s3://PASTE_LandingBucket_HERE/landed/"
 cdk destroy
 ```
 
-**Check twice.** The stack is gone:
+Then three checks, not two. The third is the one the first real teardown of
+this lab made necessary.
+
+**1. The stack is gone.**
 
 ```bash
 aws cloudformation describe-stacks --stack-name ColdlabSqsRetry --region us-east-2
 ```
 
-That should fail with `does not exist`. And nothing tagged survived:
+Must fail with `does not exist`.
+
+**2. Nothing tagged survived.**
 
 ```bash
 aws resourcegroupstaggingapi get-resources --region us-east-2 \
   --tag-filters Key=coldlab:managed,Values=true
 ```
 
-That should return an empty `ResourceTagMappingList`.
+An empty `ResourceTagMappingList` is the pass. Anything returned goes to check
+three rather than straight into a bug report.
 
-Both checks matter. The tag query misses CDK's own generated policies, and the
-stack check misses anything that was created outside the stack, so neither is
-sufficient alone.
+**3. Resolve whatever check two returns against its own service.**
+
+The Resource Groups Tagging API is an eventually-consistent *index*, not an
+authoritative view of the account. On the first real teardown of this lab, a
+minute after `cdk destroy` finished and after CloudFormation already reported
+the stack gone, the tag query still listed a Lambda event source mapping. Asked
+directly, Lambda answered `ResourceNotFoundException`: the resource was gone
+and the index was stale.
+
+That is a worse failure mode than an orphan. An orphan costs money quietly. A
+leak detector that reports leaks which are not there gets ignored within a
+week, and the one real leak gets ignored along with it. So every ARN the tag
+query returns is a question, not an answer, until the owning service confirms
+it:
+
+```bash
+# Lambda event source mapping (the uuid is the last ARN segment)
+aws lambda get-event-source-mapping --uuid UUID --region us-east-2
+# Lambda function
+aws lambda get-function --function-name NAME --region us-east-2
+# SQS
+aws sqs get-queue-url --queue-name NAME --region us-east-2
+# S3
+aws s3api head-bucket --bucket NAME
+```
+
+`ResourceNotFoundException`, `NoSuchBucket`, `NonExistentQueue` or a 404 means
+the index is stale and teardown is clean. Anything that returns a description
+is a real leak and needs deleting by hand.
+
+Checks one and two are both necessary and neither is sufficient: the tag query
+misses CDK's generated policies and the S3 auto-delete provider, which take no
+tags, while the stack check misses anything created outside the stack. Check
+three is what makes check two worth reading.
 
 ---
 
@@ -278,9 +408,50 @@ sufficient alone.
   every command below, or set `export AWS_PROFILE=NAME`.
 - **Step 4 fails with `EntityAlreadyExists`.** The OIDC provider is already
   there. Redeploy with `CreateOIDCProvider=no`.
-- **Step 5 stays red.** Read the failing step's log. If it says the role cannot
-  be assumed, the trust policy's branch does not match: the template trusts
-  `refs/heads/main` only.
+- **Step 5 stays red with `Not authorized to perform sts:AssumeRoleWithWebIdentity`.**
+  The token reached AWS and the trust policy rejected it. Do not re-read the
+  policy; print what GitHub actually sent. The smoke workflow has a step that
+  does this, so read its output:
+
+  ```bash
+  gh run view "$(gh run list --limit 1 --json databaseId --jq '.[0].databaseId')" \
+    --log | grep -A6 "claims this run sends"
+  ```
+
+  Compare the `sub` line to the `SubjectClaim` parameter in
+  `bootstrap/oidc-role.yaml` character by character. GitHub can issue the
+  subject with numeric owner and repository ids appended to their names, so a
+  policy written against the plain names looks correct and matches nothing.
+  This cost an hour the first time. The branch also has to be `main`, since the
+  policy uses an exact match rather than a wildcard.
+- **Step 5 fails with `The web identity token provided could not be validated`.**
+  A different failure from the one above, and a more encouraging one: the trust
+  policy's conditions matched, and STS got as far as trying to validate the
+  token against the identity provider. Check the provider still exists:
+
+  ```bash
+  aws iam list-open-id-connect-providers
+  ```
+
+  An empty list means the provider is gone while the role still names it. The
+  usual cause is a redeploy that passed `CreateOIDCProvider=no` after an
+  earlier deploy had created the provider: the condition went false,
+  CloudFormation deleted the resource it owned, and the trust policy was left
+  pointing at an ARN with nothing behind it. Restore it by redeploying with the
+  provider on and every other parameter stated explicitly:
+
+  ```bash
+  aws cloudformation deploy \
+    --template-file bootstrap/oidc-role.yaml \
+    --stack-name coldlab-oidc --region us-east-2 \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --parameter-overrides CreateOIDCProvider=yes \
+      SubjectClaim="repo:johnallred@7398042/coldlab@1463740861:ref:refs/heads/main"
+  ```
+
+  The general lesson is worth more than the fix: `aws cloudformation deploy`
+  re-sends template defaults for every parameter you leave out, so an omitted
+  parameter is not "unchanged", it is "reset". State them all, every time.
 - **Step 8 fails on permissions.** You are probably not bootstrapped. Go back
   to Step 7.
 - **Step 10 leaves the bucket behind.** The bucket is set to auto-delete its
