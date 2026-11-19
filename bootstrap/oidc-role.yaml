@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  GitHub Actions OIDC provider and a CI role for coldlab. The role starts with
+  no permissions on purpose: Phase 0 proves authentication, not authorization.
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Default: johnallred
+  GitHubRepo:
+    Type: String
+    Default: coldlab
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: Trust is scoped to this one branch. Widen deliberately, not by default.
+  CreateOIDCProvider:
+    Type: String
+    Default: "yes"
+    AllowedValues: ["yes", "no"]
+    Description: >
+      Set to "no" if this account already has a GitHub OIDC provider. A second
+      provider for the same URL fails with EntityAlreadyExists.
+
+Conditions:
+  ShouldCreateProvider: !Equals [!Ref CreateOIDCProvider, "yes"]
+
+Resources:
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # CloudFormation requires this property. AWS no longer uses it to
+      # validate GitHub's certificate chain, so treat it as a formality rather
+      # than a value to keep current. Verify before relying on either claim.
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+  CIRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "coldlab-ci-${GitHubRepo}"
+      Description: Assumed by GitHub Actions in coldlab via OIDC.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                # Exact match, not StringLike. A wildcard such as
+                # repo:owner/*:* would let any repository you own assume this
+                # role, which is the standard OIDC misconfiguration.
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}"
+      # No policies in Phase 0. sts:GetCallerIdentity needs none, so the smoke
+      # test proves the trust relationship works and nothing more.
+      #
+      # Phase 1 adds the CDK deploy path here. The clean pattern is to let this
+      # role assume the roles `cdk bootstrap` creates rather than granting it
+      # broad permissions directly. Take the exact role names and the
+      # qualifier from your own bootstrap output; do not copy them from memory.
+      #
+      # Policies:
+      #   - PolicyName: AssumeCdkBootstrapRoles
+      #     PolicyDocument:
+      #       Version: "2012-10-17"
+      #       Statement:
+      #         - Effect: Allow
+      #           Action: sts:AssumeRole
+      #           Resource:
+      #             - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-<qualifier>-deploy-role-${AWS::AccountId}-${AWS::Region}"
+      #             - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-<qualifier>-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
+      #             - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-<qualifier>-lookup-role-${AWS::AccountId}-${AWS::Region}"
+
+Outputs:
+  CIRoleArn:
+    Description: Set this as the repository variable AWS_ROLE_ARN.
+    Value: !GetAtt CIRole.Arn

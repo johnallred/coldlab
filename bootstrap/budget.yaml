@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  A monthly cost budget for the coldlab account, with email notification.
+  Deployed before any infrastructure, so a runaway resource is noticed early.
+
+Parameters:
+  NotificationEmail:
+    Type: String
+    Description: Address to notify. You must confirm the subscription by email.
+  MonthlyLimitUSD:
+    Type: Number
+    Default: 5
+    Description: >
+      Deliberately low. A lab harness at this volume should cost very little,
+      so the alarm is meaningful rather than decorative. Raise it once you have
+      measured a real per-run cost.
+
+Resources:
+  ColdlabBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: coldlab-monthly
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyLimitUSD
+          Unit: USD
+      NotificationsWithSubscribers:
+        # Actual spend, caught after the fact.
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref NotificationEmail
+        # Forecast, which is the one that catches a leaked resource while there
+        # is still time to delete it.
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref NotificationEmail
