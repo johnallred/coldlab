@@ -1,0 +1,113 @@
+# Observable results for the SQS retry lab.
+#
+# Every value tagged `measured` was read off a real run of ColdlabSqsRetry in
+# us-east-2 on 2026-11-19. Values tagged `derived` follow from a measured one
+# by arithmetic that is stated here so it can be checked. Nothing in this file
+# was inferred from reading the CDK stack, because the first hand run of this
+# lab proved twice over that the template does not predict the behaviour.
+
+lab: sqs-retry
+measured_on: 2026-11-19
+measured_against:
+  stack: ColdlabSqsRetry
+  region: us-east-2
+  max_receive_count: 3
+  queue_visibility_timeout_seconds: 180
+  base_backoff_seconds: 15
+
+failure_path:
+  send: '{"file":"invoice-8812.csv","fail_until":99}'
+
+  # measured: three invocations, at 22:04:31, 22:04:47 and 22:05:17.
+  worker_invocations: 3
+
+  # measured: the worker calls ChangeMessageVisibility on each failure, so the
+  # gaps are its own backoff and NOT the queue's 180s visibility timeout. The
+  # 180 is only the initial lease. Asserting against it is wrong by a factor of
+  # five.
+  backoff_seconds: [15, 30, 60]
+
+  # derived from the above: 0 + 15 + 45, then the fourth receive at ~105s is
+  # the one that exceeds max_receive_count and triggers the redrive.
+  # Consistent with the measured DLQ arrival at ~22:06:17 for a 22:04:31 send.
+  redrive_after_seconds: 105
+
+  lands_in_bucket: false
+
+  dead_letter_queue:
+    depth_increases_by: 1
+
+    # measured: 5, on the first successful read of the DLQ.
+    #
+    # The count CARRIES ACROSS the redrive and keeps incrementing on the
+    # dead-letter queue. Arrival is max_receive_count + 1 = 4, because the
+    # redrive happens on the receive that exceeds the limit rather than on the
+    # last one within it. The read itself is the fifth receive.
+    #
+    # So the assertion is not a constant. Assert on the FIRST read only:
+    #   receive_count == max_receive_count + 1 + 1
+    # and re-reading the same message invalidates it. The harness must read
+    # each DLQ message exactly once.
+    receive_count_on_first_read: 5
+    receive_count_on_arrival: 4
+
+    # measured: SentTimestamp 22:18:48.511 is the original send to the SOURCE
+    # queue, unchanged by the move. ApproximateFirstReceiveTimestamp is 6ms
+    # later, also preserved. A message's age in the DLQ is therefore measured
+    # from when it was first sent, not from when it was given up on, which is
+    # what makes the DLQ's own retention period the wrong place to look for
+    # "how long has this been failing".
+    sent_timestamp_preserved: true
+
+success_path:
+  send: '{"file":"invoice-9001.csv","fail_until":3}'
+  worker_invocations: 3            # measured
+  lands_in_bucket: true            # measured
+  bucket_key: landed/invoice-9001.csv
+  bucket_object_bytes: 57          # measured
+  dead_letter_queue:
+    depth_increases_by: 0
+
+# Rules the harness has to obey, each one learned the hard way.
+assertion_rules:
+  # A default receive-message is a SHORT poll: it samples a subset of the
+  # servers holding the queue. A queue with one or two messages very often
+  # answers with nothing. The first hand run read an empty DLQ for twenty
+  # minutes while the message sat in it.
+  - never assert absence from a receive-message without --wait-time-seconds
+
+  # Even a long poll with --max-number-of-messages 10 returned 1 of 2 messages.
+  # Counting messages by counting what a receive returns is wrong.
+  - read depth with get-queue-attributes ApproximateNumberOfMessages
+
+  # Eventual consistency, plus the 105s redrive, plus Lambda cold start.
+  - poll with a timeout rather than sleeping a fixed interval
+
+  # receive_count_on_first_read is only true once per message.
+  - read each dead-letter message exactly once per run
+
+# Teardown, measured on the same run.
+teardown:
+  stack_describe_fails_with: does not exist   # measured
+
+  # measured: the tag query listed a Lambda event source mapping AFTER
+  # CloudFormation reported the stack gone. `lambda get-event-source-mapping`
+  # on that uuid answered ResourceNotFoundException. The resource was gone and
+  # the tagging index was stale.
+  #
+  # So the harness cannot assert "no tagged resources" directly. It must
+  # resolve every ARN the tag query returns against the owning service and
+  # count only the ones that still describe.
+  tag_query_is_eventually_consistent: true
+  tagged_resources_after_resolution: 0
+
+  resolution_required_for:
+    - lambda event-source-mapping: lambda get-event-source-mapping --uuid
+    - lambda function: lambda get-function --function-name
+    - sqs queue: sqs get-queue-url --queue-name
+    - s3 bucket: s3api head-bucket --bucket
+
+  # Both are necessary, neither sufficient. The tag query misses CDK-generated
+  # policies and the S3 auto-delete provider (8 of 15 resources carry the lab
+  # tags); the stack check misses anything created outside the stack.
+  checks_required: [stack_deleted, tag_query_resolved]
