@@ -1,0 +1,36 @@
+name: OIDC smoke
+
+# Proves CI can obtain AWS credentials without any stored key. It asserts the
+# trust relationship only: the role has no permissions in Phase 0.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required to request the OIDC token
+  contents: read
+
+jobs:
+  assume:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+          role-session-name: coldlab-oidc-smoke
+
+      - name: Confirm the identity is the expected role
+        run: |
+          set -euo pipefail
+          arn=$(aws sts get-caller-identity --query Arn --output text)
+          echo "assumed: $arn"
+          case "$arn" in
+            *:assumed-role/coldlab-ci-*) echo "ok" ;;
+            *) echo "unexpected identity: $arn" >&2; exit 1 ;;
+          esac
