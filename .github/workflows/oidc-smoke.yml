@@ -18,6 +18,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Diagnostic. The trust policy matches on `sub` and `aud`, and when a
+      # correct-looking policy still rejects a token the only way forward is to
+      # read the claims the token actually carries. Prints three claims, never
+      # the token itself.
+      - name: Show the OIDC claims this run sends
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, json, os, urllib.request
+          url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=sts.amazonaws.com"
+          req = urllib.request.Request(
+              url,
+              headers={"Authorization": "bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]},
+          )
+          token = json.load(urllib.request.urlopen(req))["value"]
+          payload = token.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+          for key in ("sub", "aud", "repository", "ref", "event_name"):
+              print(f"{key} = {claims.get(key)!r}")
+          PY
+
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
