@@ -96,5 +96,69 @@ class TestRoundTrip(unittest.TestCase):
             self.assertIn("No runs recorded yet", markdown.read_text(encoding="utf-8"))
 
 
+class TestReadmeBlock(unittest.TestCase):
+    """The README quotes the record rather than restating it."""
+
+    def readme(self, tmp, body=""):
+        path = Path(tmp) / "README.md"
+        path.write_text(
+            f"# Title\n\nprose above\n\n{report.README_START}\n{body}"
+            f"{report.README_END}\n\nprose below\n", encoding="utf-8")
+        return path
+
+    def test_fills_the_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.readme(tmp)
+            summary = report.summarize([record(1, True, 100.0, a=True),
+                                        record(2, False, 200.0, a=False)])
+            self.assertTrue(report.update_readme(path, summary))
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("Pass rate: **50%**", text)
+            self.assertIn("Runs: **2**", text)
+            self.assertIn("prose above", text)
+            self.assertIn("prose below", text)
+
+    def test_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.readme(tmp)
+            summary = report.summarize([record(1, True, 100.0, a=True)])
+            self.assertTrue(report.update_readme(path, summary))
+            # Second call changes nothing, which is what lets CI use
+            # `git diff --exit-code` as a staleness check.
+            self.assertFalse(report.update_readme(path, summary))
+
+    def test_replaces_stale_content_rather_than_appending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.readme(tmp, body="- Runs: **999**\n")
+            summary = report.summarize([record(1, True, 100.0, a=True)])
+            report.update_readme(path, summary)
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("999", text)
+            self.assertEqual(text.count(report.README_START), 1)
+
+    def test_missing_markers_raise_rather_than_doing_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "README.md"
+            path.write_text("# Title\n\nno markers here\n", encoding="utf-8")
+            with self.assertRaises(ValueError) as caught:
+                report.update_readme(path, report.summarize([]))
+            self.assertIn("health:start", str(caught.exception))
+
+    def test_names_the_checks_that_both_passed_and_failed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.readme(tmp)
+            records = [record(i, True, 10.0, sometimes=(i != 3))
+                       for i in range(1, 6)]
+            report.update_readme(path, report.summarize(records))
+            self.assertIn("`sometimes`", path.read_text(encoding="utf-8"))
+
+    def test_no_runs_says_so(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.readme(tmp)
+            report.update_readme(path, report.summarize([]))
+            self.assertIn("No runs recorded yet",
+                          path.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -120,13 +120,73 @@ def render(summary: dict, records: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def regenerate(jsonl: str | Path, markdown: str | Path) -> dict:
+# The README quotes the health figures rather than restating them, so a
+# number there cannot drift from the record it describes. Everything between
+# these markers is generated; everything outside is written by hand.
+README_START = "<!-- health:start -->"
+README_END = "<!-- health:end -->"
+
+
+def readme_block(summary: dict) -> str:
+    if not summary["runs"]:
+        return ("No runs recorded yet. `python -m harness.run` writes the "
+                "first one.")
+
+    lines = [
+        f"- Runs: **{summary['runs']}**",
+        f"- Pass rate: **{summary['pass_rate'] * 100:.0f}%** "
+        f"({summary['passed']} of {summary['runs']})",
+    ]
+    if summary["median_seconds"] is not None:
+        lines.append(f"- Median duration: **{summary['median_seconds']:.0f}s**")
+
+    flaky = sorted(n for n, c in summary["checks"].items() if c["flaky"])
+    if flaky:
+        listed = ", ".join(f"`{name}`" for name in flaky)
+        lines.append(f"- Checks that have both passed and failed: {listed}")
+    else:
+        lines.append("- No check has both passed and failed")
+
+    lines.append("")
+    lines.append("Generated from [`health/health.jsonl`](health/health.jsonl) "
+                 "by `python -m harness.report`. Full table in "
+                 "[`health/HEALTH.md`](health/HEALTH.md).")
+    return "\n".join(lines)
+
+
+def update_readme(path: str | Path, summary: dict) -> bool:
+    """Replace the marked block. True when the file changed."""
+    path = Path(path)
+    text = path.read_text(encoding="utf-8")
+
+    if README_START not in text or README_END not in text:
+        raise ValueError(
+            f"{path} has no {README_START} / {README_END} markers, so the "
+            "health figures cannot be generated into it. Add them, rather "
+            "than typing figures in by hand."
+        )
+
+    before, _, rest = text.partition(README_START)
+    _, _, after = rest.partition(README_END)
+    updated = (f"{before}{README_START}\n{readme_block(summary)}\n"
+               f"{README_END}{after}")
+
+    if updated == text:
+        return False
+    path.write_text(updated, encoding="utf-8")
+    return True
+
+
+def regenerate(jsonl: str | Path, markdown: str | Path,
+               readme: str | Path | None = None) -> dict:
     records = load_records(jsonl)
     summary = summarize(records)
     Path(markdown).write_text(render(summary, records), encoding="utf-8")
+    if readme is not None:
+        update_readme(readme, summary)
     return summary
 
 
 if __name__ == "__main__":
-    s = regenerate("health/health.jsonl", "health/HEALTH.md")
-    print(f"health/HEALTH.md regenerated from {s['runs']} runs")
+    s = regenerate("health/health.jsonl", "health/HEALTH.md", "README.md")
+    print(f"health/HEALTH.md and README.md regenerated from {s['runs']} runs")

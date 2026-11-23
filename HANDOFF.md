@@ -1,34 +1,38 @@
 # HANDOFF
 
 ## Done
-- Phases 0 to 2 complete. `python -m harness.run` passed end to end on
-  2026-11-23: provision, both lab paths, assertions, teardown, verification,
-  health record. 492s. Nothing is live in 111122223333 / us-east-2
-- 67 tests pass with no credentials; CI runs them on every pull request
-- `health/health.jsonl` has 3 real runs (1 pass, 2 failures that found bugs)
+- All four phases built. `python -m harness.run` provisions, runs the steps
+  extracted from `lab/sqs-retry/lab.md`, asserts, tears down, verifies, and
+  records. Passed twice against real AWS (453s and 492s), all 11 checks green
+- Phase 3: `harness/extract.py` reads the lab document and refuses any document
+  that would weaken the test. The hardcoded step list is gone
+- Phase 4: `lab-health.yml` runs nightly at 09:17 UTC via OIDC, commits the
+  record back, and tears down in a safety step if the process is killed. The CI
+  role now has two scoped policies; both account-wide grants carry a comment
+  saying why they cannot be narrower
+- README health figures are generated from the record; CI fails if they are
+  stale. 98 tests pass with no credentials
 
 ## Failed / open
-Eight things measured that reading the code or the templates got wrong. Full
-detail in RUNBOOK troubleshooting, `lab/sqs-retry/expected.yaml` and the README
-table. The ones that still shape the design:
-- The exact receive count across a redrive is **not determinate**: 5 by hand,
-  4 from the harness, same lab. The advisory was retired rather than promoted;
-  the floor `maxReceiveCount + 1` gates
+- **The nightly workflow has never run.** Push and fire it by hand
+  (`gh workflow run lab-health.yml`) before trusting it. A failure there is
+  most likely a missing IAM permission; the error names the action
+- Redrive timing is still advisory: a handful of observations cannot set a
+  tolerance. Promoting it is what the scheduled runs are for
+- The receive count across a redrive is **not determinate**: 5 by hand, then 4
+  and 4. The advisory was retired rather than promoted; the floor gates
 - The tag query is an eventually-consistent index, so every ARN is resolved
   against its owning service before anything counts as a leak
-- A default that can never fire is worse than none: `CDK_DEFAULT_REGION` is
-  always set, so app.py's `"us-east-2"` fallback was dead code and a deploy
-  went to us-east-1
-- A fake kinder than the real tool tests nothing: the fake `aws s3 ls` exited 0
-  where the real one exits 1, so 63 tests passed through two live bugs
-- Redrive timing is still advisory; observed 115s and 146s against a nominal
-  105s. Needs more runs before a tolerance can be set honestly
+- Both failed runs predate the fix that keeps partial measurements, so that fix
+  is unit-tested but never exercised by a real failure
+- Not built, deliberately: account vending, a second lab, a web dashboard, LMS
+  integration, multi-region. See `README.md`
 
 ## Next
-Phase 3: replace `harness/steps.py` with `extract.py` reading
-`lab/sqs-retry/lab.md`, including its `# exits N:` directives. `run.py` must
-not change. Writing that lab document is most of the work.
+Fire the workflow once by hand. Then let a week accumulate and promote the
+redrive tolerance from what the record says rather than from arithmetic.
 
 ## Why
-Every one of the eight came from printing what the system did rather than
-re-reading what it was configured to do.
+The scheduled run is the only part that cannot be hurried. Everything else
+proves the lab works once; this proves whether it keeps working, and records
+the answer whether or not anyone is watching.

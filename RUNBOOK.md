@@ -408,6 +408,13 @@ against `lab/sqs-retry/expected.yaml`, destroys the stack, verifies teardown
 including resolving every tagged ARN against its own service, and appends one
 line to `health/health.jsonl`.
 
+**The steps come out of `lab/sqs-retry/lab.md`**, not out of harness code. Edit
+a command in that document and the next run uses it. That also means a careless
+edit there breaks the run, so extraction validates the document first and
+refuses to start rather than testing less than it claims; the error says which
+rule was broken. `python -m unittest discover -s harness/tests -t .` catches
+that without deploying anything, so run the tests after editing the lab.
+
 Expect eight to twelve minutes, most of it `cdk deploy` and the 105-second wait
 for the redrive.
 
@@ -447,6 +454,60 @@ it is why `health/health.jsonl` keeps every run rather than only the last.
 **`--keep` skips teardown.** Useful for debugging a failure, and it leaves
 real resources running and costing money. Use it deliberately and destroy by
 hand afterwards.
+
+---
+
+## Step 12. Let it run nightly
+
+Phase 0's CI role deliberately had no permissions, because the smoke test only
+had to prove the trust relationship. A scheduled run has to deploy, so the role
+needs two policies. They are in `bootstrap/oidc-role.yaml`; redeploy with every
+parameter stated, because an omitted one resets to its default:
+
+```bash
+aws cloudformation deploy \
+  --template-file bootstrap/oidc-role.yaml \
+  --stack-name coldlab-oidc \
+  --region us-east-2 \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    CreateOIDCProvider=yes \
+    SubjectClaim="repo:johnallred@7398042/coldlab@1463740861:ref:refs/heads/main" \
+    CdkQualifier=hnb659fds \
+    LabStackName=ColdlabSqsRetry \
+    LabBucketPrefix=coldlabsqsretry
+```
+
+**Check:** two inline policies, and the provider still there.
+
+```bash
+aws iam list-role-policies --role-name coldlab-ci-coldlab
+aws iam list-open-id-connect-providers
+```
+
+Then push, and fire the workflow by hand rather than waiting for a night:
+
+```bash
+git push
+gh workflow run lab-health.yml
+sleep 600
+gh run list --workflow=lab-health.yml --limit 1
+```
+
+**Check:** green, and a new commit on `main` from `github-actions[bot]` adding
+a line to `health/health.jsonl` and regenerating `health/HEALTH.md` and the
+README's health block.
+
+A failure here is most likely a missing permission rather than a broken lab,
+and the error names the action and resource it wanted. Add that action to the
+right policy in `bootstrap/oidc-role.yaml`, scoped by resource, and redeploy.
+Resist the urge to widen a resource to `*` to get past it: the two grants in
+there that are already `*` each carry a comment saying why they cannot be
+narrower, and that comment is the standard for adding a third.
+
+The workflow runs at 09:17 UTC. The odd minute is deliberate, since runners
+are busiest on the hour and a late start looks like a slow lab in the duration
+figures.
 
 ---
 

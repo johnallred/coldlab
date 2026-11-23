@@ -1,0 +1,112 @@
+name: Lab health
+
+# Runs the whole lab against real AWS on a schedule and records the result.
+#
+# This is the workflow the project exists to justify. Everything before it
+# proves the lab works once; this proves whether it keeps working, and records
+# the answer whether or not anyone is watching.
+
+on:
+  schedule:
+    # 09:17 UTC, which is 01:17 in America/Los_Angeles. The odd minute is
+    # deliberate: runners are busiest on the hour, and a job that starts late
+    # looks like a slow lab in the duration figures.
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  id-token: write    # assume the AWS role via OIDC; no stored credentials
+  contents: write    # commit the health record back
+
+concurrency:
+  # Two runs would deploy the same stack name and fight over it. Queue rather
+  # than cancel, because a cancelled run may be killed between deploy and
+  # teardown and leave resources behind.
+  group: lab-health
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    # Generous: a normal run takes about eight minutes. The limit exists to
+    # stop a hung run holding resources for hours, not to pace a healthy one.
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Pinned to the version the lab has actually been deployed with, rather
+      # than whatever is latest on the night this runs. A CDK CLI newer than
+      # the bootstrap stack fails with a message about bootstrap versions that
+      # says nothing about the real cause.
+      - run: npm install -g aws-cdk@2.1149.0
+
+      - run: pip install -r harness/requirements.txt -r infra/requirements.txt
+
+      # Before touching AWS. Extraction validates the lab document, so a bad
+      # edit to lab.md fails here in seconds instead of after a deploy.
+      - name: Harness tests
+        run: python -m unittest discover -s harness/tests -t .
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-2
+
+      # continue-on-error so the record still gets committed when the lab
+      # fails. A failing run whose result is thrown away is the one you most
+      # need to have kept.
+      - name: Run the lab
+        id: lab
+        continue-on-error: true
+        run: python -m harness.run
+
+      # The harness tears down in a `finally`, but a killed process has no
+      # `finally`. This covers a timeout or a cancellation.
+      - name: Safety teardown
+        if: failure() || cancelled()
+        run: |
+          cd infra
+          cdk destroy --force || true
+          aws resourcegroupstaggingapi get-resources --region us-east-2 \
+            --tag-filters Key=coldlab:managed,Values=true
+
+      - name: Commit the health record
+        if: always()
+        env:
+          OUTCOME: ${{ steps.lab.outcome }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add health/health.jsonl health/HEALTH.md README.md
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+            exit 0
+          fi
+          git commit -m "Lab health: $(date -u +%Y-%m-%dT%H:%MZ) ${OUTCOME}"
+          for attempt in 1 2 3; do
+            if git pull --rebase --autostash origin "${GITHUB_REF_NAME}" \
+               && git push; then
+              exit 0
+            fi
+            echo "push attempt ${attempt} failed, retrying"
+            sleep 5
+          done
+          echo "could not push the health record" >&2
+          exit 1
+
+      # The record is committed by now, so failing here loses nothing and the
+      # run shows red, which is what a notification keys off.
+      - name: Fail if the lab failed
+        if: steps.lab.outcome == 'failure'
+        run: |
+          echo "the lab run failed; see the step above and health/HEALTH.md" >&2
+          exit 1

@@ -23,7 +23,7 @@ import yaml
 
 from harness import arns, checks, parse, report
 from harness.shell import Timeout, poll_until, run
-from harness.steps import lab_steps
+from harness.steps import KNOWN_CONDITIONS, lab_steps
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -105,6 +105,13 @@ def execute_steps(steps, env, region, outputs, log, measured: dict) -> dict:
         "success_file_present": lambda: (
             success_key in bucket_keys(bucket) or False),
     }
+    # The lab document may only name a condition that exists here, and this
+    # module may not quietly gain one the document cannot reach. Asserting it
+    # in both directions is what stops the contract rotting.
+    assert set(conditions) == set(KNOWN_CONDITIONS), (
+        f"condition table {sorted(conditions)} does not match "
+        f"KNOWN_CONDITIONS {sorted(KNOWN_CONDITIONS)}"
+    )
 
     for step in steps:
         if step.wait_for:
@@ -159,6 +166,9 @@ def main(argv=None) -> int:
                     help="skip teardown. Leaves resources running; the next run "
                          "will not be clean and the account will cost money.")
     ap.add_argument("--health-dir", default=str(ROOT / "health"))
+    ap.add_argument("--readme", default=str(ROOT / "README.md"),
+                    help="the file whose health:start/health:end block is "
+                         "regenerated from the record")
     args = ap.parse_args(argv)
 
     expected = yaml.safe_load(
@@ -198,7 +208,11 @@ def main(argv=None) -> int:
         if missing:
             raise RuntimeError(f"stack outputs missing: {sorted(missing)}")
 
-        env = {"Q": outputs["QueueUrl"], "DLQ": outputs["DeadLetterUrl"],
+        # The same four variables the lab document tells a student to export.
+        # REGION is here because the lab's commands read "$REGION", which is
+        # what lets the harness pin the region rather than inheriting it.
+        env = {"REGION": args.region,
+               "Q": outputs["QueueUrl"], "DLQ": outputs["DeadLetterUrl"],
                "BUCKET": outputs["LandingBucket"]}
 
         execute_steps(lab_steps(args.region), env, args.region,
@@ -266,7 +280,8 @@ def main(argv=None) -> int:
 
     health = Path(args.health_dir)
     report.append_record(health / "health.jsonl", record)
-    summary = report.regenerate(health / "health.jsonl", health / "HEALTH.md")
+    summary = report.regenerate(health / "health.jsonl", health / "HEALTH.md",
+                                args.readme)
 
     log("")
     log(f"  {'PASS' if passed else 'FAIL'} in {seconds:.0f}s  "

@@ -6,12 +6,35 @@ it down, and verify nothing survived.
 
 **Start here: [RUNBOOK.md](RUNBOOK.md).**
 
-**Status: Phase 2 of 4.** Phases 0 and 1 are deployed, run by hand, and torn
-down. The harness is written and covered by 67 tests against a fake AWS; it has
-not yet been run against a real deployment. See `HANDOFF.md`.
+**Status: all four phases built.** `python -m harness.run` provisions the lab,
+runs the steps extracted from `lab/sqs-retry/lab.md`, asserts them, tears down
+and verifies, in about eight minutes. It has passed twice against real AWS. The
+nightly workflow is written and the CI role has the permissions to run it; what
+is missing is runs, which only time supplies. See `HANDOFF.md`.
 
 This README states only what exists. Claims get added when the thing they
 describe does.
+
+## Lab health
+
+<!-- health:start -->
+- Runs: **4**
+- Pass rate: **50%** (2 of 4)
+- Median duration: **426s**
+- Checks that have both passed and failed: `run.completed`
+
+Generated from [`health/health.jsonl`](health/health.jsonl) by `python -m harness.report`. Full table in [`health/HEALTH.md`](health/HEALTH.md).
+<!-- health:end -->
+
+Every figure above is generated from the record by `python -m harness.report`,
+which the harness calls at the end of each run. None of it is typed in, so a
+number here cannot drift from the runs it describes, and CI fails if the
+generated block is stale.
+
+The figure worth attention is not the pass rate. It is whether a check has both
+passed and failed, because a lab that fails one run in twenty is a worse
+problem than one that fails every time: the second gets fixed and the first
+gets blamed on the student.
 
 ## What exists now
 
@@ -20,11 +43,13 @@ describe does.
 | `bootstrap/oidc-role.yaml` | CloudFormation: GitHub OIDC provider and a CI role with no permissions yet |
 | `bootstrap/budget.yaml` | CloudFormation: a monthly cost budget and email notification |
 | `infra/` | CDK stack: the queue, dead-letter queue, worker and failing partner |
+| `lab/sqs-retry/lab.md` | The student-facing lab. The harness runs these commands, it does not hold a copy |
 | `lab/sqs-retry/expected.yaml` | The observable results, every value tagged `measured` or `derived` |
 | `harness/` | Provision, run the lab's steps, assert, tear down, verify, record |
 | `health/` | One JSON record per run, and a generated table |
 | `.github/workflows/oidc-smoke.yml` | Proves CI can assume the role without stored credentials |
 | `.github/workflows/harness-tests.yml` | The harness's tests, on every pull request, with no AWS |
+| `.github/workflows/lab-health.yml` | The nightly run against real AWS, which appends to the record |
 
 ## The lab
 
@@ -47,7 +72,7 @@ python -m harness.run              # provision, run, assert, tear down, record
 python -m harness.run --keep       # leave it running, for debugging
 python -m harness.report           # regenerate health/HEALTH.md
 
-python -m unittest discover -s harness/tests -t .   # 67 tests, no AWS needed
+python -m unittest discover -s harness/tests -t .   # 98 tests, no AWS needed
 ```
 
 `python -m harness.run` needs the `aws` and `cdk` CLIs and working
@@ -98,15 +123,51 @@ gates. **An advisory check retired by evidence is the mechanism working, not a
 climbdown.**
 
 The redrive timing is still advisory because its tolerance is a guess rather
-than a figure taken from recorded runs. Observed so far: 115s and 146s against
-a derived nominal of 105s.
+than a figure taken from recorded runs. Every observation is recorded in
+`lab/sqs-retry/expected.yaml` under `redrive_observed_seconds`, and a handful
+of runs is too thin a basis for a band. That is the concrete reason the
+scheduled run matters: it is what turns a guessed tolerance into a measured
+one.
+
+## The lab document is the step list
+
+The harness holds no copy of the lab's commands. `harness/extract.py` reads
+`lab/sqs-retry/lab.md` and runs the commands a student is told to type, so the
+document and the thing being tested cannot drift apart. A lab that quietly
+stops matching its instructions still passes every test you would normally
+write, and that is the failure this prevents.
+
+Four directives, written as shell comments so they run harmlessly if a student
+copies a whole block. Each requires a reason, because a directive without one
+is how an exception becomes permanent.
+
+| Directive | Effect |
+|---|---|
+| `# step: <name>` | Names the step. The nearest heading is used otherwise |
+| `# exits <n>: <why>` | This exit code also means success. Repeatable |
+| `# not run by the harness: <why>` | Skip the block, for what a student does that the harness does differently |
+| `# harness waits for: <cond> (timeout <n>s)` | Replace this block's `sleep` with a poll of a named condition |
+
+That last one is the only deliberate difference between what a student does and
+what the harness does. A student sleeps; the harness polls, because a fixed
+sleep either wastes time or reports a failure that was merely early.
+
+**Extraction refuses to run a document that would weaken the test.** It rejects
+a second dead-letter read, since the receive count is only the arrival value on
+the first one. It rejects a `receive-message` without `--wait-time-seconds`,
+since a short poll's empty result proves nothing. It rejects a bare `sleep` in a
+runnable step, a wait on a condition the runner cannot poll, and a runnable
+block holding more than one command. Every one of those rules encodes something
+a real run measured, so each exists to stop a plausible edit to `lab.md` from
+quietly testing less than it claims.
+
+The migration was also the test of Phase 2's step model: the extracted steps
+have the same names, order, exit codes and wait conditions as the hardcoded
+list, and `run.py` needed two lines changed, both to pass `REGION` into the
+environment the lab's commands read.
 
 ## What does not exist yet
 
-**Phase 3, extraction.** The harness's steps are hardcoded in
-`harness/steps.py`, shaped so that `extract.py` can produce the same list from
-`lab/sqs-retry/lab.md`. Until then the lab document and the thing being tested
-can still drift, which is the failure this project most wants to prevent.
-
-**Phase 4, scheduling.** No nightly run, so `health/HEALTH.md` has no real runs
-in it and the flake rate the whole design is pointed at is still unmeasured.
+**Phase 4, scheduling.** No nightly run, so `health/HEALTH.md` holds three runs
+rather than a week of them, and the flake rate the whole design is pointed at is
+still barely measured.

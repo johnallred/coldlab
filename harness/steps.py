@@ -1,20 +1,30 @@
-"""The lab's steps, hardcoded. Phase 3 replaces this module with extraction.
+"""The step model, and where the steps come from.
 
-Phase 2 hardcodes the steps; Phase 3 parses them out of `lab/sqs-retry/lab.md`
-so that editing the lab document changes what the harness runs. The point of
-this file is therefore its *shape*, not its contents: `extract.py` has to
-produce exactly this list of `Step` objects and nothing in `run.py` may change.
+Phase 2 hardcoded the lab's commands in this module. Phase 3 deleted that list:
+`lab_steps` now reads `lab/<lab>/lab.md` and extracts them, so editing the lab
+document changes what the harness runs without touching harness code.
+
+The shape of `Step` is the interface between the two halves. It did not change
+during that migration, which was the test of whether Phase 2 got it right.
 
 One deliberate difference between what a student does and what the harness
-does, and it is the only one. A student is told to `sleep`. The harness polls
-instead, because a fixed sleep either wastes time or reports a failure that was
-merely early. So a wait in the lab document becomes a `wait_for` condition
-here, named rather than timed. Every other command is run verbatim.
+does, and only one. A student is told to `sleep`. The harness polls a named
+condition instead, because a fixed sleep either wastes time or reports a
+failure that was merely early. `KNOWN_CONDITIONS` is the contract: the lab
+document may only name a condition the runner can actually poll, and
+`extract.validate` rejects the document otherwise.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+#: Conditions `run.py` knows how to poll. `run.py` asserts that its own
+#: condition table matches this set exactly, so the two cannot drift.
+KNOWN_CONDITIONS = frozenset({"dlq_has_message", "success_file_present"})
 
 
 @dataclass
@@ -31,62 +41,22 @@ class Step:
     #: Not every useful command exits zero. `aws s3 ls` on a prefix with no
     #: objects exits 1, and in the middle of this lab an empty prefix is the
     #: correct state, so treating non-zero as failure fails the lab for
-    #: behaving properly. The fieldguide hit the same thing and annotates its
-    #: quick start with `# exits N: why`; Phase 3 reads that same directive out
-    #: of `lab.md` to populate this field.
+    #: behaving properly. The lab document says so with `# exits N: why`.
     expect_exit: tuple[int, ...] = (0,)
 
 
-def lab_steps(region: str) -> list[Step]:
-    """The SQS retry lab, in the order a student performs it."""
-    return [
-        Step(
-            "send the message that always fails",
-            command=(
-                f'aws sqs send-message --region {region} --queue-url "$Q" '
-                "--message-body "
-                "'{\"file\":\"invoice-8812.csv\",\"fail_until\":99}'"
-            ),
-        ),
-        Step(
-            "wait for the redrive to the dead-letter queue",
-            wait_for="dlq_has_message",
-            timeout=420,
-        ),
-        Step(
-            "read the dead-letter queue",
-            # Long poll, and exactly once per run: the receive count is only
-            # the arrival value on the first read, and reading again
-            # increments it.
-            command=(
-                f'aws sqs receive-message --region {region} --queue-url "$DLQ" '
-                "--attribute-names All --wait-time-seconds 20 "
-                "--max-number-of-messages 1"
-            ),
-        ),
-        Step(
-            "confirm the failing file never landed",
-            command='aws s3 ls "s3://$BUCKET/landed/"',
-            # exits 1: the prefix is empty, which is the whole point of this
-            # step. Exit 0 is also fine, since by now the bucket may hold an
-            # object from an earlier run of the success path.
-            expect_exit=(0, 1),
-        ),
-        Step(
-            "send the message that recovers on the third attempt",
-            command=(
-                f'aws sqs send-message --region {region} --queue-url "$Q" '
-                "--message-body "
-                "'{\"file\":\"invoice-9001.csv\",\"fail_until\":3}'"
-            ),
-        ),
-        Step(
-            "wait for the file to land",
-            wait_for="success_file_present",
-            timeout=300,
-        ),
-        Step(
-            "confirm the file landed",
-            command='aws s3 ls "s3://$BUCKET/landed/"',
-        ),
-    ]
+def lab_document(lab: str = "sqs-retry") -> Path:
+    return ROOT / "lab" / lab / "lab.md"
+
+
+def lab_steps(region: str | None = None, lab: str = "sqs-retry") -> list[Step]:
+    """The lab's steps, read out of its own document.
+
+    `region` is accepted and unused: the lab document reads `$REGION` from the
+    environment like a student's shell does, and `run.py` sets it from
+    `--region`. Keeping the parameter means `run.py` did not have to change
+    when extraction replaced the hardcoded list.
+    """
+    from harness.extract import extract  # late, to avoid a circular import
+
+    return extract(lab_document(lab))

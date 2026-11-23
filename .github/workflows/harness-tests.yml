@@ -28,7 +28,10 @@ jobs:
       - name: Harness tests
         run: python -m unittest discover -s harness/tests -t . -v
 
-      - name: The health table is not stale
+      # Both the table and the README's generated block come from the same
+      # record, so regenerating them must change nothing. A diff here means a
+      # figure was edited by hand, which is how a number starts lying.
+      - name: The generated health figures are not stale
         run: |
           python -m harness.report
-          git diff --exit-code health/HEALTH.md
+          git diff --exit-code health/HEALTH.md README.md

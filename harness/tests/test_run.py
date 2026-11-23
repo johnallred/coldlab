@@ -104,12 +104,18 @@ class HarnessCase(unittest.TestCase):
     def go(self, fake, extra_args=()):
         """Run main() against a fake, in a throwaway health directory."""
         with tempfile.TemporaryDirectory() as tmp:
+            # A throwaway README, so a test can never rewrite the real one.
+            readme = Path(tmp) / "README.md"
+            readme.write_text(
+                f"# fake\n\n{report.README_START}\n{report.README_END}\n",
+                encoding="utf-8")
             # A controlled clock, so redrive_seconds lands near the measured
             # 105s instead of the zero a fake run would otherwise produce.
             clock = iter([1795126728000] + [1795126728000 + 106_000] * 50)
             with mock.patch.object(runner, "run", fake), \
                  mock.patch.object(runner, "now_ms", lambda: next(clock)):
-                code = runner.main(["--health-dir", tmp, *extra_args])
+                code = runner.main(["--health-dir", tmp,
+                                    "--readme", str(readme), *extra_args])
             records = report.load_records(Path(tmp) / "health.jsonl")
             return code, records, (Path(tmp) / "HEALTH.md").read_text(encoding="utf-8")
 

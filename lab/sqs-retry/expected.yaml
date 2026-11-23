@@ -35,7 +35,9 @@ failure_path:
   # derived 105 as the nominal figure and let the recorded runs set the
   # tolerance, rather than moving the nominal to chase one observation.
   redrive_after_seconds: 105
-  redrive_observed_seconds: [115, 146]
+  # 115s came from a run whose measurements were lost before that bug was
+  # fixed, so it is read off the log line rather than the record.
+  redrive_observed_seconds: [115, 147, 117]
 
   lands_in_bucket: false
 
@@ -56,9 +58,16 @@ failure_path:
     receive_count_on_first_read: 5
     receive_count_on_arrival: 4
 
-    # Two observations, two values: 5 by hand on 2026-11-19, 4 from the first
-    # passing harness run on 2026-11-23. Same lab, same region, same
+    # Three observations: 5 by hand on 2026-11-19, then 4 and 4 from the two
+    # passing harness runs on 2026-11-23. Same lab, same region, same
     # maxReceiveCount.
+    #
+    # So 4 is the harness's consistent value and the hand run is the outlier.
+    # A plausible explanation is that the hand run's earlier short poll did
+    # receive the message and returned it on a sampling the terminal showed as
+    # empty, or that SQS simply delivered once more; neither has been measured
+    # and neither needs to be. The point stands either way: this value is not
+    # something to assert.
     #
     # So the exact count across a redrive is NOT determinate, and writing 5
     # here as though it were a fact was a mistake: it was one observation. The

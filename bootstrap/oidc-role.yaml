@@ -32,6 +32,29 @@ Parameters:
       role stops being assumable, print the claim in the workflow and compare,
       rather than re-reading the policy.
 
+  CdkQualifier:
+    Type: String
+    Default: hnb659fds
+    Description: >
+      The qualifier `cdk bootstrap` used, which appears in the names of the
+      roles it created. `hnb659fds` is the default and is what this account
+      has. Read it from `aws iam list-roles` rather than assuming.
+
+  LabStackName:
+    Type: String
+    Default: ColdlabSqsRetry
+    Description: >
+      The lab stack's name, used to scope the CI role's permissions to the
+      resources that stack creates. CDK names resources with this as a prefix.
+
+  LabBucketPrefix:
+    Type: String
+    Default: coldlabsqsretry
+    Description: >
+      The lowercased stack name, which is how CDK prefixes the landing bucket.
+      S3 bucket names cannot contain uppercase letters, so this cannot simply
+      reuse LabStackName.
+
   CreateOIDCProvider:
     Type: String
     Default: "yes"
@@ -89,25 +112,93 @@ Resources:
                 # repo:owner/*:* would let any repository you own assume this
                 # role, which is the standard OIDC misconfiguration.
                 token.actions.githubusercontent.com:sub: !Ref SubjectClaim
-      # No policies in Phase 0. sts:GetCallerIdentity needs none, so the smoke
-      # test proves the trust relationship works and nothing more.
+      # Phase 0 gave this role no permissions: sts:GetCallerIdentity needs
+      # none, so the smoke test proved the trust relationship and nothing
+      # else. Phase 4 needs a scheduled run to deploy the lab, run it and tear
+      # it down, so the permissions arrive here.
       #
-      # Phase 1 adds the CDK deploy path here. The clean pattern is to let this
-      # role assume the roles `cdk bootstrap` creates rather than granting it
-      # broad permissions directly. Take the exact role names and the
-      # qualifier from your own bootstrap output; do not copy them from memory.
+      # Two separate needs, and conflating them is how this ends up as
+      # AdministratorAccess.
       #
-      # Policies:
-      #   - PolicyName: AssumeCdkBootstrapRoles
-      #     PolicyDocument:
-      #       Version: "2012-10-17"
-      #       Statement:
-      #         - Effect: Allow
-      #           Action: sts:AssumeRole
-      #           Resource:
-      #             - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-<qualifier>-deploy-role-${AWS::AccountId}-${AWS::Region}"
-      #             - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-<qualifier>-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
-      #             - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-<qualifier>-lookup-role-${AWS::AccountId}-${AWS::Region}"
+      # 1. `cdk deploy` and `cdk destroy` work by assuming the roles that
+      #    `cdk bootstrap` created. This role does not need deploy permissions
+      #    itself, only permission to assume those. Role names taken from
+      #    `aws iam list-roles` on this account, not from memory.
+      # 2. The harness also runs plain `aws` commands under this role's own
+      #    identity: send and read messages, list the bucket, read the stack
+      #    outputs, query tags, and resolve each tagged ARN against its
+      #    service. Those need their own grants, scoped by resource wherever
+      #    the service supports it.
+      Policies:
+        - PolicyName: AssumeCdkBootstrapRoles
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource:
+                  # cfn-exec-role is deliberately absent: CloudFormation
+                  # assumes it, not the deployer. image-publishing-role is
+                  # absent because this lab publishes no container image
+                  # assets; add it if that ever changes.
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-deploy-role-${AWS::AccountId}-${AWS::Region}"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-lookup-role-${AWS::AccountId}-${AWS::Region}"
+
+              # The CDK CLI confirms the bootstrap version through this
+              # parameter before deploying. When it cannot read it, the error
+              # talks about bootstrap stack versions and says nothing useful,
+              # which is how a region mistake once looked like a bootstrap
+              # problem for twenty minutes.
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cdk-bootstrap/${CdkQualifier}/version"
+
+        - PolicyName: RunAndVerifyTheLab
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource: !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LabStackName}/*"
+
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                Resource: !Sub "arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${LabStackName}-*"
+
+              # `aws s3 ls s3://bucket/prefix/` needs ListBucket on the
+              # bucket, not GetObject on its contents. The harness never reads
+              # an object, only checks that a key exists.
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${LabBucketPrefix}-*"
+
+              # Teardown verification. tag:GetResources supports no
+              # resource-level permissions, so "*" is the only form it has;
+              # it is a read of tags across the account and nothing more.
+              - Effect: Allow
+                Action: tag:GetResources
+                Resource: "*"
+
+              # Resolving a tagged ARN against the service that owns it,
+              # because the tagging API is an eventually-consistent index and
+              # an ARN it returns is a question rather than a verdict. All
+              # reads. GetEventSourceMapping is keyed by UUID and supports no
+              # useful resource scoping.
+              - Effect: Allow
+                Action: lambda:GetEventSourceMapping
+                Resource: "*"
+              - Effect: Allow
+                Action: lambda:GetFunction
+                Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${LabStackName}-*"
+              - Effect: Allow
+                Action: iam:GetRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${LabStackName}-*"
 
 Outputs:
   CIRoleArn:
