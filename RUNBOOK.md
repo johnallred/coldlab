@@ -389,6 +389,67 @@ three is what makes check two worth reading.
 
 ---
 
+## Step 11. Run the harness
+
+Steps 8 to 10 in one command, which is the whole point of Phase 2.
+
+From the repository root, with the Step 6 environment active:
+
+```bash
+cd /Users/johnallred/vscode_projects/coldlab
+source .venv/bin/activate
+pip install -r harness/requirements.txt
+
+python -m harness.run
+```
+
+It provisions with `cdk deploy`, runs the lab's steps in order, asserts them
+against `lab/sqs-retry/expected.yaml`, destroys the stack, verifies teardown
+including resolving every tagged ARN against its own service, and appends one
+line to `health/health.jsonl`.
+
+Expect eight to twelve minutes, most of it `cdk deploy` and the 105-second wait
+for the redrive.
+
+**Check:** it exits 0 and prints `PASS`. `health/HEALTH.md` gains a run, and
+`git diff` shows it.
+
+### Before trusting it, run the tests
+
+These need no credentials, no deployment and no network:
+
+```bash
+python -m unittest discover -s harness/tests -t .
+```
+
+They assert the harness's behaviour against the values the hand run measured,
+and they assert that it **fails** when it should: `maxReceiveCount` wrong, the
+message never reaching the dead-letter queue, the failing file landing anyway,
+a surviving tagged resource, and a tagged ARN nothing knows how to resolve.
+That last pair is Phase 2's "prove the failure path" requirement, satisfied
+deterministically rather than by deliberately breaking a deployed stack once.
+
+### If it fails
+
+The run still tore down, because teardown is in a `finally` block. Confirm it
+rather than assuming:
+
+```bash
+aws cloudformation describe-stacks --stack-name ColdlabSqsRetry --region us-east-2
+```
+
+That must say `does not exist`. Then read the failing check's `expected` and
+`actual` in the printed output, and decide which of the two is wrong: a
+genuine regression in the lab, or an expectation that was measured once under
+conditions that do not always hold. The second is the more common answer, and
+it is why `health/health.jsonl` keeps every run rather than only the last.
+
+**`--keep` skips teardown.** Useful for debugging a failure, and it leaves
+real resources running and costing money. Use it deliberately and destroy by
+hand afterwards.
+
+---
+
 ## If something goes wrong
 
 - **A stack is stuck in `ROLLBACK_COMPLETE`.** This happens whenever a stack

@@ -1,0 +1,100 @@
+"""The health record. The figure that matters is the flake rate."""
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from harness import report
+
+
+def record(run_id, passed, seconds, **check_outcomes):
+    return {
+        "run_id": run_id,
+        "started_at": f"2026-11-{run_id:02d}T00:00:00+00:00",
+        "seconds": seconds,
+        "passed": passed,
+        "checks": [{"name": name, "ok": ok, "gating": True}
+                   for name, ok in check_outcomes.items()],
+    }
+
+
+class TestSummarize(unittest.TestCase):
+    def test_no_runs(self):
+        summary = report.summarize([])
+        self.assertEqual(summary["runs"], 0)
+        self.assertIsNone(summary["pass_rate"])
+
+    def test_pass_rate_and_median(self):
+        records = [
+            record(1, True, 100.0, a=True),
+            record(2, True, 200.0, a=True),
+            record(3, False, 300.0, a=False),
+        ]
+        summary = report.summarize(records)
+        self.assertEqual(summary["runs"], 3)
+        self.assertAlmostEqual(summary["pass_rate"], 2 / 3)
+        self.assertEqual(summary["median_seconds"], 200.0)
+
+    def test_flaky_is_both_outcomes_not_just_failure(self):
+        records = [record(i, True, 10.0, sometimes=(i != 3), always=False, never=True)
+                   for i in range(1, 6)]
+        checks = report.summarize(records)["checks"]
+
+        # Failed once in five: the dangerous kind.
+        self.assertTrue(checks["sometimes"]["flaky"])
+        self.assertAlmostEqual(checks["sometimes"]["failure_rate"], 1 / 5)
+
+        # Fails every time. Broken, not flaky; it will get fixed.
+        self.assertFalse(checks["always"]["flaky"])
+        self.assertEqual(checks["always"]["failure_rate"], 1.0)
+
+        # Never fails. Stable.
+        self.assertFalse(checks["never"]["flaky"])
+        self.assertEqual(checks["never"]["failure_rate"], 0.0)
+
+
+class TestRoundTrip(unittest.TestCase):
+    def test_append_then_load_then_render(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = Path(tmp) / "health.jsonl"
+            markdown = Path(tmp) / "HEALTH.md"
+
+            report.append_record(jsonl, record(1, True, 120.0, a=True))
+            report.append_record(jsonl, record(2, False, 140.0, a=False))
+
+            self.assertEqual(len(report.load_records(jsonl)), 2)
+
+            summary = report.regenerate(jsonl, markdown)
+            text = markdown.read_text(encoding="utf-8")
+
+            self.assertEqual(summary["runs"], 2)
+            self.assertIn("Pass rate: **50%**", text)
+            self.assertIn("`a`", text)
+            self.assertIn("Flaky checks", text)
+
+    def test_creates_parent_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = Path(tmp) / "nested" / "deeper" / "health.jsonl"
+            report.append_record(jsonl, record(1, True, 1.0, a=True))
+            self.assertTrue(jsonl.exists())
+
+    def test_records_are_one_json_object_per_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = Path(tmp) / "health.jsonl"
+            for i in (1, 2, 3):
+                report.append_record(jsonl, record(i, True, 1.0, a=True))
+            lines = jsonl.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(lines), 3)
+            for line in lines:
+                json.loads(line)
+
+    def test_empty_record_set_renders_without_crashing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            markdown = Path(tmp) / "HEALTH.md"
+            report.regenerate(Path(tmp) / "absent.jsonl", markdown)
+            self.assertIn("No runs recorded yet", markdown.read_text(encoding="utf-8"))
+
+
+if __name__ == "__main__":
+    unittest.main()

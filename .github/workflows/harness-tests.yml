@@ -1,0 +1,34 @@
+name: Harness tests
+
+# The harness's logic is separated from its AWS calls precisely so that this
+# workflow can exist: it proves the assertions, the parsers, the ARN resolution
+# and the whole run loop against a fake AWS, with no credentials, no
+# deployment, and no cost. The scheduled real run lands in Phase 4.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r harness/requirements.txt
+
+      - name: Harness tests
+        run: python -m unittest discover -s harness/tests -t . -v
+
+      - name: The health table is not stale
+        run: |
+          python -m harness.report
+          git diff --exit-code health/HEALTH.md

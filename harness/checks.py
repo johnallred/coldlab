@@ -1,0 +1,151 @@
+"""The assertions, as pure functions over measured observations.
+
+Separated from the AWS calls on purpose: these are the part worth testing, and
+they test without credentials, a deployed stack, or a network.
+
+Two kinds of check. A **gating** check decides the exit code. An **advisory**
+check is evaluated, printed and recorded every run, but does not fail the run
+yet, because its stability has not been measured over enough runs to gate on.
+Each advisory carries the criterion for promoting it. An advisory check is not
+a check that cannot fail: it fails loudly in the report and in health.jsonl,
+and the only thing it does not do is set the exit code.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Check:
+    name: str
+    ok: bool
+    expected: object
+    actual: object
+    gating: bool = True
+    note: str = ""
+
+    def line(self) -> str:
+        mark = "PASS" if self.ok else ("FAIL" if self.gating else "warn")
+        tail = "" if self.ok else f"  expected {self.expected!r}, got {self.actual!r}"
+        return f"[{mark}] {self.name}{tail}"
+
+
+def failure_path(expected: dict, obs: dict) -> list[Check]:
+    spec = expected["failure_path"]
+    dlq = spec["dead_letter_queue"]
+    max_receive = expected["measured_against"]["max_receive_count"]
+    checks = []
+
+    checks.append(Check(
+        "dlq.depth",
+        obs["dlq_depth"] == dlq["depth_increases_by"],
+        dlq["depth_increases_by"], obs["dlq_depth"],
+        note="Depth from get-queue-attributes, never a count of what a "
+             "receive returned.",
+    ))
+
+    # Gating form. At-least-once delivery means an extra receive is legal, so
+    # the floor is what the semantics guarantee and the exact value is
+    # advisory below.
+    floor = max_receive + 1
+    checks.append(Check(
+        "dlq.receive_count_at_least_max_plus_one",
+        obs["receive_count"] >= floor,
+        f">= {floor}", obs["receive_count"],
+        note="Redrive fires on the receive that exceeds maxReceiveCount, so "
+             "arrival is maxReceiveCount + 1. The harness's own read is one "
+             "more.",
+    ))
+
+    checks.append(Check(
+        "dlq.receive_count_exact",
+        obs["receive_count"] == dlq["receive_count_on_first_read"],
+        dlq["receive_count_on_first_read"], obs["receive_count"],
+        gating=False,
+        note="Advisory. Promote to gating once twenty consecutive runs agree. "
+             "Only true on the first read of a message, so the harness must "
+             "read each dead-letter message exactly once per run.",
+    ))
+
+    # SentTimestamp survives the redrive, so it should still be the moment the
+    # harness sent the message rather than the moment SQS gave up on it.
+    skew_ms = abs(obs["sent_timestamp_ms"] - obs["sent_at_ms"])
+    checks.append(Check(
+        "dlq.sent_timestamp_preserved",
+        skew_ms < 10_000,
+        "within 10s of the original send", f"{skew_ms}ms skew",
+        note="A DLQ message's age is measured from its first send, not from "
+             "when it was given up on.",
+    ))
+
+    failing_file = spec.get("file") or "invoice-8812.csv"
+    checks.append(Check(
+        "bucket.failing_file_absent",
+        failing_file not in obs["bucket_keys"],
+        f"{failing_file} absent", obs["bucket_keys"],
+    ))
+
+    nominal = spec["redrive_after_seconds"]
+    observed = obs["redrive_seconds"]
+    checks.append(Check(
+        "timing.redrive_within_tolerance",
+        0.5 * nominal <= observed <= 3.0 * nominal,
+        f"{0.5 * nominal:.0f}-{3.0 * nominal:.0f}s", round(observed, 1),
+        gating=False,
+        note="Advisory, and wide on purpose. Lambda cold start and SQS "
+             "polling both add variance. Promote only with a tolerance taken "
+             "from recorded runs rather than from this guess.",
+    ))
+
+    return checks
+
+
+def success_path(expected: dict, obs: dict) -> list[Check]:
+    spec = expected["success_path"]
+    key = spec["bucket_key"].split("/")[-1]
+    return [Check(
+        "bucket.success_file_present",
+        key in obs["bucket_keys"],
+        f"{key} present", obs["bucket_keys"],
+    )]
+
+
+def teardown(expected: dict, obs: dict) -> list[Check]:
+    """obs['tagged'] is a list of {'arn', 'status'} with status in
+    {'gone', 'leak', 'unresolved'}."""
+    checks = [Check(
+        "teardown.stack_deleted",
+        obs["stack_exists"] is False,
+        "stack absent", "present" if obs["stack_exists"] else "absent",
+    )]
+
+    tagged = obs.get("tagged") or []
+    leaks = [t["arn"] for t in tagged if t["status"] == "leak"]
+    unresolved = [t["arn"] for t in tagged if t["status"] == "unresolved"]
+
+    checks.append(Check(
+        "teardown.no_leaks",
+        not leaks,
+        "no surviving tagged resources", leaks,
+        note="A resource the owning service still describes. This is the one "
+             "that costs money.",
+    ))
+
+    checks.append(Check(
+        "teardown.all_tagged_resolved",
+        not unresolved,
+        "every tagged ARN resolvable", unresolved,
+        note="An ARN no resolver in harness/arns.py understands. Counted as a "
+             "failure because 'I could not check' is not 'it is gone'. Fix by "
+             "adding a resolver, not by lowering the bar.",
+    ))
+
+    return checks
+
+
+def verdict(checks: list[Check]) -> tuple[bool, list[Check]]:
+    """(passed, failures). Only gating checks decide the exit code."""
+    failures = [c for c in checks if not c.ok]
+    passed = not any(c.gating for c in failures)
+    return passed, failures
