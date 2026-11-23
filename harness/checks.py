@@ -58,14 +58,22 @@ def failure_path(expected: dict, obs: dict) -> list[Check]:
              "more.",
     ))
 
+    # This started life as an exact-value check with a note promising to
+    # promote it to gating after twenty agreeing runs. The second observation
+    # disagreed with the first, 5 by hand and 4 from the harness, so the exact
+    # value is not an expectation and never was. It is now a drift detector:
+    # it fires on a value never seen before, which is worth a look, and it
+    # must not gate. The floor above is what gates.
+    observed = dlq.get("receive_count_observed") or [dlq["receive_count_on_first_read"]]
     checks.append(Check(
-        "dlq.receive_count_exact",
-        obs["receive_count"] == dlq["receive_count_on_first_read"],
-        dlq["receive_count_on_first_read"], obs["receive_count"],
+        "dlq.receive_count_in_observed_set",
+        obs["receive_count"] in observed,
+        f"one of {observed}", obs["receive_count"],
         gating=False,
-        note="Advisory. Promote to gating once twenty consecutive runs agree. "
-             "Only true on the first read of a message, so the harness must "
-             "read each dead-letter message exactly once per run.",
+        note="Advisory, and deliberately never to be promoted: two runs of "
+             "the same lab produced different counts, so SQS does not promise "
+             "this. Only true on the first read of a message, so the harness "
+             "must read each dead-letter message exactly once per run.",
     ))
 
     # SentTimestamp survives the redrive, so it should still be the moment the

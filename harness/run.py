@@ -87,9 +87,15 @@ def resolve_tagged(region: str, tag_key: str) -> list[dict]:
 
 # --- the loop ---------------------------------------------------------------
 
-def execute_steps(steps, env, region, outputs, log) -> dict:
-    """Run the lab's steps in order, returning what was measured."""
-    measured: dict = {"bucket_keys": []}
+def execute_steps(steps, env, region, outputs, log, measured: dict) -> dict:
+    """Run the lab's steps in order, filling `measured` as it goes.
+
+    `measured` is passed in rather than returned so that a run which aborts
+    half way still carries what it had measured by then. The first two real
+    runs failed and recorded no measurements at all, which threw away the
+    evidence needed to diagnose them.
+    """
+    measured.setdefault("bucket_keys", [])
     queue_url, dlq_url = outputs["QueueUrl"], outputs["DeadLetterUrl"]
     bucket = outputs["LandingBucket"]
     success_key = "invoice-9001.csv"
@@ -114,7 +120,14 @@ def execute_steps(steps, env, region, outputs, log) -> dict:
         log(f"  step: {step.name}")
         if "send-message" in step.command and "8812" in step.command:
             measured["sent_at_ms"] = now_ms()
-        result = run(step.command, env=env, check=True)
+        result = run(step.command, env=env)
+        if result.returncode not in step.expect_exit:
+            raise RuntimeError(
+                f"step {step.name!r} exited {result.returncode}, "
+                f"expected one of {list(step.expect_exit)}: {step.command}\n"
+                f"{(result.stderr or result.stdout).strip()}"
+            )
+        measured.setdefault("step_exits", {})[step.name] = result.returncode
 
         if "receive-message" in step.command:
             message = parse.first_message(result.json())
@@ -188,8 +201,8 @@ def main(argv=None) -> int:
         env = {"Q": outputs["QueueUrl"], "DLQ": outputs["DeadLetterUrl"],
                "BUCKET": outputs["LandingBucket"]}
 
-        measured = execute_steps(lab_steps(args.region), env, args.region,
-                                 outputs, log)
+        execute_steps(lab_steps(args.region), env, args.region,
+                      outputs, log, measured)
 
         failure_obs = {**measured, "bucket_keys": measured["bucket_keys"]}
         all_checks += checks.failure_path(expected, failure_obs)

@@ -42,10 +42,12 @@ class FakeAws:
     """Dispatches on the command text, the way the real CLI would."""
 
     def __init__(self, *, dlq_message=DLQ_MESSAGE, tagged=STALE_TAG,
-                 probe_ok=False, destroy_ok=True, deploy_ok=True):
+                 probe_ok=False, destroy_ok=True, deploy_ok=True,
+                 s3_exit=None):
         self.commands = []
         self.calls = []
         self.deploy_ok = deploy_ok
+        self.s3_exit = s3_exit
         self.destroyed = False
         self.success_landed = False
         self.dlq_message = dlq_message
@@ -82,9 +84,15 @@ class FakeAws:
         if "receive-message" in command:
             return ok(json.dumps(self.dlq_message))
         if "s3 ls" in command:
-            listing = ("2026-11-19 14:31:21         57 invoice-9001.csv\n"
-                       if self.success_landed else "")
-            return ok(listing)
+            if self.s3_exit is not None:
+                return Result(command, self.s3_exit, "", "boom")
+            if not self.success_landed:
+                # The real CLI exits 1 on a prefix with no objects. The first
+                # version of this fake returned 0, so the tests passed while
+                # the real run died here. A fake that is kinder than the tool
+                # it stands in for tests nothing.
+                return Result(command, 1, "", "")
+            return ok("2026-11-19 14:31:21         57 invoice-9001.csv\n")
         if "resourcegroupstaggingapi" in command:
             return ok(json.dumps(self.tagged))
         if "get-event-source-mapping" in command:
@@ -155,6 +163,41 @@ class TestGreenRun(HarnessCase):
         code, records, _ = self.go(fake)
         self.assertTrue(any("get-event-source-mapping" in c for c in fake.commands))
         self.assertEqual(code, 0)
+
+
+class TestExitCodes(HarnessCase):
+    """Not every useful command exits zero."""
+
+    def test_empty_prefix_exiting_one_is_not_a_failure(self):
+        # `aws s3 ls` exits 1 on a prefix with no objects, and mid-lab an
+        # empty prefix is the correct state. The green run above already
+        # depends on this, since the fake now exits 1 there.
+        code, records, _ = self.go(FakeAws())
+        self.assertEqual(code, 0, [c for c in records[0]["checks"] if not c["ok"]])
+        exits = records[0]["measurements"]["step_exits"]
+        self.assertEqual(exits["confirm the failing file never landed"], 1)
+
+    def test_an_unexpected_exit_code_aborts_the_run(self):
+        # Exit 2 is not in any step's expect_exit, so it must still fail.
+        code, records, _ = self.go(FakeAws(s3_exit=2))
+        self.assertEqual(code, 1)
+        completed = next(c for c in records[0]["checks"]
+                         if c["name"] == "run.completed")
+        self.assertIn("exited 2", completed["actual"])
+
+
+class TestMeasurementsSurviveFailure(HarnessCase):
+    def test_what_was_measured_before_the_failure_is_recorded(self):
+        # The first two real runs failed and recorded no measurements at all,
+        # throwing away the evidence needed to diagnose them.
+        fake = FakeAws(dlq_message={"Messages": []})
+        code, records, _ = self.go(fake)
+        self.assertEqual(code, 1)
+        measurements = records[0]["measurements"]
+        self.assertEqual(measurements["dlq_depth"], 1)
+        self.assertIn("sent_at_ms", measurements)
+        self.assertIn("send the message that always fails",
+                      measurements["step_exits"])
 
 
 class TestRegionIsPinned(HarnessCase):

@@ -30,7 +30,12 @@ failure_path:
   # derived from the above: 0 + 15 + 45, then the fourth receive at ~105s is
   # the one that exceeds max_receive_count and triggers the redrive.
   # Consistent with the measured DLQ arrival at ~22:06:17 for a 22:04:31 send.
+  #
+  # The first real harness run measured 115s (8 polls at 15s). Keep the
+  # derived 105 as the nominal figure and let the recorded runs set the
+  # tolerance, rather than moving the nominal to chase one observation.
   redrive_after_seconds: 105
+  redrive_observed_seconds: [115, 146]
 
   lands_in_bucket: false
 
@@ -50,6 +55,21 @@ failure_path:
     # each DLQ message exactly once.
     receive_count_on_first_read: 5
     receive_count_on_arrival: 4
+
+    # Two observations, two values: 5 by hand on 2026-11-19, 4 from the first
+    # passing harness run on 2026-11-23. Same lab, same region, same
+    # maxReceiveCount.
+    #
+    # So the exact count across a redrive is NOT determinate, and writing 5
+    # here as though it were a fact was a mistake: it was one observation. The
+    # attribute is called Approximate for a reason, and SQS does not promise
+    # that the redrive consumes a delivery rather than moving the message when
+    # the lease expires. Either behaviour produces a legal count.
+    #
+    # What gates is therefore the floor, maxReceiveCount + 1, which held both
+    # times. This list is a drift detector: a value outside it has never been
+    # seen and is worth looking at. Do not promote it to gating.
+    receive_count_observed: [5, 4]
 
     # measured: SentTimestamp 22:18:48.511 is the original send to the SOURCE
     # queue, unchanged by the move. ApproximateFirstReceiveTimestamp is 6ms

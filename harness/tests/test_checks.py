@@ -115,15 +115,28 @@ class TestBrokenRunsFail(unittest.TestCase):
 
 
 class TestAdvisoryChecksDoNotGate(unittest.TestCase):
-    def test_exact_receive_count_warns_but_does_not_fail_the_run(self):
-        # At-least-once delivery makes an extra receive legal, so the exact
-        # value must not fail the build until measurement says it is stable.
-        obs = {**MEASURED_FAILURE, "receive_count": 6}
+    def test_an_unseen_receive_count_warns_but_does_not_fail_the_run(self):
+        # 7 has never been observed, so the drift detector fires. It must not
+        # fail the run: the floor is what gates.
+        obs = {**MEASURED_FAILURE, "receive_count": 7}
         results = checks.failure_path(EXPECTED, obs)
-        exact = next(c for c in results if c.name == "dlq.receive_count_exact")
-        self.assertFalse(exact.ok)
-        self.assertFalse(exact.gating)
+        drift = next(c for c in results
+                     if c.name == "dlq.receive_count_in_observed_set")
+        self.assertFalse(drift.ok)
+        self.assertFalse(drift.gating)
         self.assertEqual(gating_failures(results), [])
+
+    def test_both_observed_counts_are_accepted(self):
+        # 5 by hand on 2026-11-19, 4 from the first passing harness run.
+        # Neither may fail the run, and an exact-value check would have failed
+        # the second one for no reason.
+        for count in (4, 5):
+            obs = {**MEASURED_FAILURE, "receive_count": count}
+            results = checks.failure_path(EXPECTED, obs)
+            drift = next(c for c in results
+                         if c.name == "dlq.receive_count_in_observed_set")
+            self.assertTrue(drift.ok, f"count {count} should be accepted")
+            self.assertEqual(gating_failures(results), [])
 
     def test_an_advisory_still_reports_as_failed(self):
         # An advisory is not a check that cannot fail. It fails in the record;

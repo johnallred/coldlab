@@ -26,6 +26,15 @@ class Step:
     wait_for: str | None = None
     #: How long to keep polling, seconds.
     timeout: int = 360
+    #: Exit codes that mean this step worked.
+    #:
+    #: Not every useful command exits zero. `aws s3 ls` on a prefix with no
+    #: objects exits 1, and in the middle of this lab an empty prefix is the
+    #: correct state, so treating non-zero as failure fails the lab for
+    #: behaving properly. The fieldguide hit the same thing and annotates its
+    #: quick start with `# exits N: why`; Phase 3 reads that same directive out
+    #: of `lab.md` to populate this field.
+    expect_exit: tuple[int, ...] = (0,)
 
 
 def lab_steps(region: str) -> list[Step]:
@@ -58,6 +67,10 @@ def lab_steps(region: str) -> list[Step]:
         Step(
             "confirm the failing file never landed",
             command='aws s3 ls "s3://$BUCKET/landed/"',
+            # exits 1: the prefix is empty, which is the whole point of this
+            # step. Exit 0 is also fine, since by now the bucket may hold an
+            # object from an earlier run of the success path.
+            expect_exit=(0, 1),
         ),
         Step(
             "send the message that recovers on the third attempt",

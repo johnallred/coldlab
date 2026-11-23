@@ -7,7 +7,7 @@ it down, and verify nothing survived.
 **Start here: [RUNBOOK.md](RUNBOOK.md).**
 
 **Status: Phase 2 of 4.** Phases 0 and 1 are deployed, run by hand, and torn
-down. The harness is written and covered by 63 tests against a fake AWS; it has
+down. The harness is written and covered by 67 tests against a fake AWS; it has
 not yet been run against a real deployment. See `HANDOFF.md`.
 
 This README states only what exists. Claims get added when the thing they
@@ -47,7 +47,7 @@ python -m harness.run              # provision, run, assert, tear down, record
 python -m harness.run --keep       # leave it running, for debugging
 python -m harness.report           # regenerate health/HEALTH.md
 
-python -m unittest discover -s harness/tests -t .   # 63 tests, no AWS needed
+python -m unittest discover -s harness/tests -t .   # 67 tests, no AWS needed
 ```
 
 `python -m harness.run` needs the `aws` and `cdk` CLIs and working
@@ -84,9 +84,22 @@ measured over enough runs to gate on. Each advisory states its own promotion
 criterion in `harness/checks.py`, and an advisory that fails is still recorded
 as a failure: the only thing it does not do is set the exit code.
 
-Two checks are advisory today. The exact receive count, because at-least-once
-delivery makes an extra receive legal. And the redrive timing, because its
-tolerance is currently a guess rather than a figure taken from recorded runs.
+Two checks are advisory today, and one of them has already changed shape
+because of what the runs said.
+
+The receive count across a redrive started as an exact-value check with a note
+promising to promote it once twenty runs agreed. The second observation
+disagreed with the first: 5 measured by hand, 4 from the first passing harness
+run, same lab and same `maxReceiveCount`. So the exact value is not an
+expectation and never was, and had it been gating that run would have failed
+for no reason. It is now a drift detector over the set of values ever observed,
+marked never to be promoted, and the floor of `maxReceiveCount + 1` is what
+gates. **An advisory check retired by evidence is the mechanism working, not a
+climbdown.**
+
+The redrive timing is still advisory because its tolerance is a guess rather
+than a figure taken from recorded runs. Observed so far: 115s and 146s against
+a derived nominal of 105s.
 
 ## What does not exist yet
 
