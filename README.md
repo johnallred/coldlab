@@ -72,7 +72,7 @@ python -m harness.run              # provision, run, assert, tear down, record
 python -m harness.run --keep       # leave it running, for debugging
 python -m harness.report           # regenerate health/HEALTH.md
 
-python -m unittest discover -s harness/tests -t .   # 98 tests, no AWS needed
+python -m unittest discover -s harness/tests -t .   # 100 tests, no AWS needed
 ```
 
 `python -m harness.run` needs the `aws` and `cdk` CLIs and working
@@ -168,6 +168,54 @@ environment the lab's commands read.
 
 ## What does not exist yet
 
-**Phase 4, scheduling.** No nightly run, so `health/HEALTH.md` holds three runs
-rather than a week of them, and the flake rate the whole design is pointed at is
-still barely measured.
+All four phases are built, so what is missing is no longer code.
+
+**Runs.** The scheduled workflow has fired once. `health/health.jsonl` holds a
+handful of records, which is enough to prove the loop closes and not enough to
+say anything about reliability. The flake rate this whole design points at is
+the figure most in need of time, and it cannot be hurried.
+
+**A measured cost per run.** Absent on purpose rather than estimated. Two
+things make a quick answer wrong. Free tier covers SQS and Lambda at this
+volume, so the billed figure on a personal account would be near zero and
+would understate a catalog by whatever free tier is worth. And billing data
+lags about a day, so the runs recorded so far are not fully priced yet. What
+can be said honestly today is the time: a median run takes 453 seconds, so a
+nightly catalog of two hundred labs is roughly twenty-five hours of serial
+runtime, which is the number that forces a parallelism decision before a cost
+one. A dollar figure goes here when it has been measured and recorded, and not
+before.
+
+**Promotion of the two advisory checks.** The redrive tolerance is still a
+guess, and it stays advisory until the record can set a band. See *Gating and
+advisory checks* above.
+
+**A real failure since the last fix.** Both recorded failures predate the
+change that keeps a run's partial measurements when it aborts. That fix is
+unit-tested but has never been exercised by an actual failed run, so the next
+genuine failure is also a test of the diagnostics.
+
+## What it deliberately does not prove
+
+Stated here rather than left for a reader to notice, because the limits are
+what make the rest believable.
+
+**Account vending.** Real per-learner isolation provisions a throwaway account
+per student through AWS Organizations. That cannot be demonstrated on a
+personal account and is not attempted: the harness isolates by stack name and
+tag instead. Account vending is the production shape, and the hardest part of
+the problem, and nothing here shows it.
+
+**One lab, not a catalog.** The harness is written so that a second lab is a
+directory rather than a rewrite, and then it stops. Nothing here proves it
+scales to hundreds, and the arithmetic above is arithmetic rather than
+evidence.
+
+**No dashboard.** A JSON record and a generated Markdown table make the point;
+a web dashboard would not add to it.
+
+**No LMS integration, no learner telemetry, no instructor feedback loop.** The
+lab is tested, not delivered. How a result reaches a gradebook is out of scope.
+
+**GitHub Actions rather than CodePipeline and CodeBuild**, and a single region
+in a single account.

@@ -49,6 +49,23 @@ class TestReadmeClaims(unittest.TestCase):
     def test_readme_does_not_claim_the_harness_is_unwritten(self):
         self.assertNotIn("What does not exist yet\n\nThe harness", self.readme)
 
+    def test_every_path_the_table_lists_exists(self):
+        """A README that points at a file which is not there has started lying."""
+        table = self.readme.split("## What exists now", 1)[1].split("\n## ", 1)[0]
+        paths = re.findall(r"`([a-zA-Z0-9_./-]+/[a-zA-Z0-9_./-]+)`", table)
+        self.assertGreater(len(paths), 5, "the table lists almost no paths")
+        for path in paths:
+            self.assertTrue((ROOT / path).exists(), f"{path} is listed but absent")
+
+    def test_every_workflow_is_listed(self):
+        """A workflow the README does not mention is a capability nobody knows
+        about, which is how the README came to claim there was no nightly run
+        for an hour after there was one."""
+        workflows = sorted(p.name for p in (ROOT / ".github/workflows").glob("*.yml"))
+        self.assertTrue(workflows, "no workflows found at all")
+        for name in workflows:
+            self.assertIn(name, self.readme, f"{name} is not mentioned in the README")
+
 
 if __name__ == "__main__":
     unittest.main()
