@@ -1,0 +1,61 @@
+name: Health page
+
+# Publishes the lab's health page to GitHub Pages, generated from the record.
+#
+# It runs after every Lab health run rather than on the push that run makes:
+# a commit pushed with the workflow's own GITHUB_TOKEN does not start other
+# workflows, so a push trigger alone would never see a nightly record. It also
+# runs on a push that changes the record or the generator, and by hand.
+
+on:
+  workflow_run:
+    workflows: ["Lab health"]
+    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - health/health.jsonl
+      - harness/site.py
+      - harness/report.py
+      - harness/tolerance.py
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # The default branch, which holds the record the nightly run just
+      # committed. Nothing from the triggering run is used.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Standard library only, so nothing is installed.
+      - name: Generate the page from the record
+        run: python -m harness.site --out _site
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v5

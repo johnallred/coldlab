@@ -9,7 +9,9 @@
   is wall clock, not cloud resources
 - `python -m harness.tolerance` answers the one open decision from the record;
   its verdict lands in HEALTH.md and the README every run
-- Identifiers scrubbed on write, swept repo-wide, gone from history. 155 tests
+- Identifiers scrubbed on write, swept repo-wide, gone from history. 163 tests
+- Public health page: `harness/site.py` generates it from the record;
+  `.github/workflows/pages.yml` publishes it after each Lab health run
 
 ## Failed / open
 - Waiting on runs: 3 observations on 1 day, criterion wants 10 across 7. A
@@ -21,7 +23,8 @@
   found the stale tag index. Named in the README, deliberately unresolved
 
 ## Next
-Let the nightly accumulate. The 2026-11-30 task decides. Nothing else is open.
+Turn on Pages (Settings > Pages > Source: GitHub Actions), then run Health page
+by hand once. Let the nightly accumulate; the 2026-11-30 task decides.
 
 ## Why
 Seven claims rotted in a day: a phase status, a figure list, a prompt, two

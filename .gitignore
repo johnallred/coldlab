@@ -5,3 +5,4 @@ cdk.out/
 .cdk.staging/
 .env
 .DS_Store
+_site/
