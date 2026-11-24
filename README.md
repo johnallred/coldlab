@@ -175,17 +175,6 @@ handful of records, which is enough to prove the loop closes and not enough to
 say anything about reliability. The flake rate this whole design points at is
 the figure most in need of time, and it cannot be hurried.
 
-**A measured cost per run.** Absent on purpose rather than estimated. Two
-things make a quick answer wrong. Free tier covers SQS and Lambda at this
-volume, so the billed figure on a personal account would be near zero and
-would understate a catalog by whatever free tier is worth. And billing data
-lags about a day, so the runs recorded so far are not fully priced yet. What
-can be said honestly today is the time: a median run takes 453 seconds, so a
-nightly catalog of two hundred labs is roughly twenty-five hours of serial
-runtime, which is the number that forces a parallelism decision before a cost
-one. A dollar figure goes here when it has been measured and recorded, and not
-before.
-
 **Promotion of the two advisory checks.** The redrive tolerance is still a
 guess, and it stays advisory until the record can set a band. See *Gating and
 advisory checks* above.
@@ -194,6 +183,68 @@ advisory checks* above.
 change that keeps a run's partial measurements when it aborts. That fix is
 unit-tested but has never been exercised by an actual failed run, so the next
 genuine failure is also a test of the diagnostics.
+
+## What a run costs
+
+Measured 2026-11-23 from four recorded runs. **Resource cost is not the
+constraint, and that is the finding.**
+
+### Method, and why not the bill
+
+The bill reads $0.00 for every day of these runs. That is true and useless:
+Lambda's free tier is one million requests and 400,000 GB-seconds a month, and
+one run uses about 0.0001% of the compute allowance, so a personal account
+prices a catalog at zero.
+
+Worse, the bill cannot attribute. This account is a linked account in an AWS
+Organization, and `aws ce update-cost-allocation-tags-status` fails with
+*"Linked account doesn't have access to cost allocation tags"*: activating a
+cost allocation tag requires the management account. The lab tags every
+resource it creates, and that still buys no cost attribution here. **On a
+linked account, per-lab cost attribution is unavailable regardless of how well
+you tag.**
+
+So the figures below are measured usage multiplied by published unit prices,
+which is what a training organization would actually pay rather than what this
+account was charged. Usage comes from CloudWatch, which is attributable by
+resource name and needs no billing access.
+
+### Per run, measured
+
+| Resource | Measured per run | Unit price | Cost per run |
+|---|---|---|---|
+| Lambda compute | 3,701 ms at 128 MB = 0.4626 GB-s | $0.0000166667 per GB-s | $0.0000077 |
+| Lambda requests | 14 invocations | $0.20 per million | $0.0000028 |
+| SQS requests | ~88 (78 measured, plus ~10 `GetQueueAttributes` the metrics do not count) | $0.24 per million | ~$0.000021 |
+| **AWS total** | | | **~$0.00003** |
+| CI runner | 8.5 minutes, Linux 2-core | $0.006 per minute | **$0.051** |
+
+**The runner costs about seventeen hundred times the AWS resources.** Every
+instinct says optimize the lab's infrastructure; the arithmetic says the
+infrastructure is free and the wall clock is the bill.
+
+At a catalog of two hundred labs tested nightly: roughly **$0.18 a month of
+AWS** against **$306 a month of CI**, or nothing at all if the repositories are
+public, in which case the binding constraint is not money but the 28 hours of
+serial runtime a night, which forces a parallelism decision.
+
+### The one number worth optimizing, and what it costs to do so
+
+Of the ~78 SQS requests a run makes, **68 are empty receives**: the Lambda event
+source mapping polling a queue with nothing in it, for the whole eight minutes
+the stack exists. The lab sends two messages. So SQS cost tracks stack
+*lifetime*, not lab activity, and the same is true of the runner minutes.
+
+One lever moves both: keep a warm stack and reset it between runs instead of
+deploying and destroying each time. Most of the 453 seconds is `cdk deploy` and
+`cdk destroy`, not the lab.
+
+That trade is not obviously worth taking, and the README should say so rather
+than recommend it. Deploy and destroy per run is what makes the teardown
+assertion mean anything, and teardown verification is the thing this harness
+exists to demonstrate. A warm stack would cut the dominant cost and remove the
+check that found the stale tag index. Worth naming as a decision, not resolving
+by arithmetic.
 
 ## What it deliberately does not prove
 
