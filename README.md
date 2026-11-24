@@ -78,6 +78,9 @@ gets blamed on the student.
 | `.github/workflows/lab-health.yml` | The nightly run against real AWS, which appends to the record |
 | `harness/site.py` | Generates the public health page from the record |
 | `harness/publish.py` | Versions the lab by content and promotes a version to learners on evidence |
+| `bootstrap/learner-role.yaml` | A learner's role for the lab, with a permissions boundary every learner role carries |
+| `lab/sqs-retry/sandbox.yaml` | What a learner must be able to do, and what they must never be able to do |
+| `harness/sandbox.py` | Asks AWS's policy simulator about every line of that list for the deployed role |
 | `published/` | Frozen copies of each published lab version, and which one learners get |
 | `health/notes.json` | Hand-written notes explaining particular runs, shown on the page as notes |
 | `.github/workflows/pages.yml` | Publishes that page to GitHub Pages after every nightly run |
@@ -106,7 +109,7 @@ python -m harness.report           # regenerate HEALTH.md and the README's figur
 python -m harness.phases           # regenerate the README's phase status
 python -m harness.tolerance        # can the redrive advisory be promoted yet?
 
-python -m unittest discover -s harness/tests -t .   # 174 tests, no AWS needed
+python -m unittest discover -s harness/tests -t .   # 182 tests, no AWS needed
 ```
 
 `python -m harness.run` needs the `aws` and `cdk` CLIs and working
@@ -190,6 +193,27 @@ and rolling back would not help. `python -m harness.publish status` says which
 of the two cases a failure is. Runs recorded before versioning began carry no
 version and count for nothing, so the first promotion waits for three nightly
 runs.
+
+## The learner's sandbox
+
+A learner gets the `coldlab-learner` role from `bootstrap/learner-role.yaml`.
+Its identity policy grants what this lab's steps need, on this lab's resources;
+a permissions boundary, attached in the same template, caps every learner role
+at coldlab-named resources in one region, with no IAM and the audit trail out
+of reach. `lab/sqs-retry/sandbox.yaml` lists what a learner must be able to do
+and what they must never be able to do, and `python -m harness.sandbox` asks
+AWS's policy simulator about each line for the deployed role, with the boundary
+and any organisation policies applied. A line that disagrees fails the run in
+either direction. The tests check the template against the list offline.
+
+It also reports what the simulator cannot see. The lab has learners run
+`cdk deploy`, which works by assuming the CDK deploy role, and stacks are then
+created by the CloudFormation execution role, which `cdk bootstrap` gives
+`AdministratorAccess` by default. So a learner who can deploy can create
+anything a CDK app describes, with administrator rights, whatever their own
+policies say. The check names that finding; `--strict` fails on it. The fixes
+are to re-bootstrap with `--cloudformation-execution-policies` scoped to the
+lab's services, or to provision the stack for learners so they never deploy.
 
 ## The lab document is the step list
 

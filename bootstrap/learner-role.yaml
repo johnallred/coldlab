@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  A learner's role for the coldlab lab, and the permissions boundary that caps
+  every learner role. Tested by `python -m harness.sandbox` against the
+  requirements in lab/sqs-retry/sandbox.yaml.
+
+# Two layers, deliberately different in scope. The identity policy grants what
+# this one lab needs, on this lab's resources. The boundary is the most any
+# coldlab learner role can ever have, whatever identity policy it is given
+# later: coldlab-named resources only, one region, no IAM, and the account's
+# audit trail and organisation settings out of reach. A learner role is
+# useful only if the boundary is attached, so it is attached here rather than
+# left to whoever creates the role.
+
+Parameters:
+  LabStackName:
+    Type: String
+    Default: ColdlabSqsRetry
+  LabBucketPrefix:
+    Type: String
+    Default: coldlabsqsretry
+  CdkQualifier:
+    Type: String
+    Default: hnb659fds
+    Description: Read it from `aws iam list-roles`, as for the CI role.
+
+Resources:
+  LearnerBoundary:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: coldlab-learner-boundary
+      Description: The most any coldlab learner role can do. Grants nothing on its own.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LabServicesOnLabResources
+            Effect: Allow
+            Action:
+              - cloudformation:Describe*
+              - cloudformation:GetTemplate
+              - sqs:SendMessage
+              - sqs:ReceiveMessage
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+              - logs:FilterLogEvents
+              - logs:GetLogEvents
+              - logs:DescribeLogStreams
+              - s3:ListBucket
+              - s3:GetObject
+            Resource:
+              - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/Coldlab*/*"
+              - !Sub "arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:Coldlab*"
+              - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/Coldlab*"
+              - !Sub "arn:${AWS::Partition}:s3:::coldlab*"
+          # Listing log groups supports no resource scoping narrower than the
+          # account's log groups, so it is allowed on all of them; it reads names.
+          - Sid: ListLogGroups
+            Effect: Allow
+            Action: logs:DescribeLogGroups
+            Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*"
+          # `cdk deploy` and `cdk destroy` work by assuming the bootstrap roles.
+          # See the deployer finding in harness/sandbox.py: whatever the
+          # CloudFormation execution role may do, a learner who can assume
+          # the deploy role can do too.
+          - Sid: CdkBootstrapRoles
+            Effect: Allow
+            Action: sts:AssumeRole
+            Resource:
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-deploy-role-${AWS::AccountId}-${AWS::Region}"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
+              - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-lookup-role-${AWS::AccountId}-${AWS::Region}"
+          - Sid: CdkBootstrapVersion
+            Effect: Allow
+            Action: ssm:GetParameter
+            Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cdk-bootstrap/${CdkQualifier}/version"
+          - Sid: OneRegion
+            Effect: Deny
+            NotAction:
+              - sts:*
+              - iam:*
+            Resource: "*"
+            Condition:
+              StringNotEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: NoIdentityChanges
+            Effect: Deny
+            Action: iam:*
+            Resource: "*"
+          - Sid: AuditTrailAndAccount
+            Effect: Deny
+            Action:
+              - cloudtrail:StopLogging
+              - cloudtrail:DeleteTrail
+              - cloudtrail:UpdateTrail
+              - organizations:*
+              - account:*
+              - budgets:ModifyBudget
+              - budgets:DeleteBudgetAction
+            Resource: "*"
+
+  LearnerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: coldlab-learner
+      Description: A learner doing the coldlab sqs-retry lab.
+      PermissionsBoundary: !Ref LearnerBoundary
+      # Assumable by principals in this account that are allowed to, which is
+      # how an instructor or a test signs in as a learner. A real catalogue
+      # would issue these per learner, in a per-learner account.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SqsRetryLab
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource: !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LabStackName}/*"
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                Resource: !Sub "arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${LabStackName}-*"
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*"
+              - Effect: Allow
+                Action:
+                  - logs:FilterLogEvents
+                  - logs:GetLogEvents
+                  - logs:DescribeLogStreams
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${LabStackName}-*"
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${LabBucketPrefix}-*"
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-deploy-role-${AWS::AccountId}-${AWS::Region}"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-file-publishing-role-${AWS::AccountId}-${AWS::Region}"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-lookup-role-${AWS::AccountId}-${AWS::Region}"
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cdk-bootstrap/${CdkQualifier}/version"
+
+Outputs:
+  LearnerRoleArn:
+    Value: !GetAtt LearnerRole.Arn
+  LearnerBoundaryArn:
+    Value: !Ref LearnerBoundary

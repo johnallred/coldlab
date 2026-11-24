@@ -543,6 +543,29 @@ figures.
 
 ---
 
+## Step 13. The learner's sandbox
+
+Deploy the learner role and its permissions boundary, then test them against
+the list of what a learner must and must never be able to do:
+
+```bash
+aws cloudformation deploy \
+  --template-file bootstrap/learner-role.yaml \
+  --stack-name coldlab-learner \
+  --region us-east-2 \
+  --capabilities CAPABILITY_NAMED_IAM
+
+python -m harness.sandbox
+```
+
+Run it with your own administrator credentials, not the CI role: it calls
+`iam:SimulatePrincipalPolicy` and `iam:ListAttachedRolePolicies`.
+
+**Check:** the last lines read `18 of 18 requirements hold`. Expect a `RISK
+deployer` line as well while the CDK execution role has `AdministratorAccess`:
+that is a real finding about the account, explained in the README under *The
+learner's sandbox*, not a failure of this step.
+
 ## If something goes wrong
 
 - **A stack is stuck in `ROLLBACK_COMPLETE`.** This happens whenever a stack

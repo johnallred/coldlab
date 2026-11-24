@@ -1,0 +1,68 @@
+# What a learner doing this lab must be able to do, and what they must never be
+# able to do. `python -m harness.sandbox` asks AWS's policy simulator about each
+# line for the deployed coldlab-learner role, with its permissions boundary and
+# any organisation policies applied, and fails on any line that disagrees.
+#
+# Write the second list first. It is the one nobody writes until something has
+# already happened.
+#
+# Placeholders: {partition} {region} {account} {stack} {bucket} {qualifier}.
+# Resource names after the prefix are examples; the policies match on prefix.
+
+must_allow:
+  - why: read the stack outputs, step 2
+    action: cloudformation:DescribeStacks
+    resource: "arn:{partition}:cloudformation:{region}:{account}:stack/{stack}/example"
+  - why: send the failing message, step 3
+    action: sqs:SendMessage
+    resource: "arn:{partition}:sqs:{region}:{account}:{stack}-Downloads-example"
+  - why: count the dead-letter queue, step 5
+    action: sqs:GetQueueAttributes
+    resource: "arn:{partition}:sqs:{region}:{account}:{stack}-DeadLetters-example"
+  - why: read the dead letter, step 5
+    action: sqs:ReceiveMessage
+    resource: "arn:{partition}:sqs:{region}:{account}:{stack}-DeadLetters-example"
+  - why: find the worker's log group, step 4
+    action: logs:DescribeLogGroups
+    resource: "arn:{partition}:logs:{region}:{account}:log-group:*"
+  - why: tail the worker's log, step 4
+    action: logs:FilterLogEvents
+    resource: "arn:{partition}:logs:{region}:{account}:log-group:/aws/lambda/{stack}-Worker-example:*"
+  - why: list the landing bucket, steps 6 and 7
+    action: s3:ListBucket
+    resource: "arn:{partition}:s3:::{bucket}-landing-example"
+  - why: cdk deploy and destroy, steps 1 and 8
+    action: sts:AssumeRole
+    resource: "arn:{partition}:iam::{account}:role/cdk-{qualifier}-deploy-role-{account}-{region}"
+
+must_deny:
+  - why: hand the CI role to something the learner controls
+    action: iam:PassRole
+    resource: "arn:{partition}:iam::{account}:role/coldlab-ci-coldlab"
+  - why: become the CI role directly
+    action: sts:AssumeRole
+    resource: "arn:{partition}:iam::{account}:role/coldlab-ci-coldlab"
+  - why: create a user that outlives the lab
+    action: iam:CreateUser
+    resource: "arn:{partition}:iam::{account}:user/backdoor"
+  - why: mint long-lived keys
+    action: iam:CreateAccessKey
+    resource: "arn:{partition}:iam::{account}:user/*"
+  - why: use the lab in another region
+    action: sqs:SendMessage
+    resource: "arn:{partition}:sqs:us-east-1:{account}:{stack}-Downloads-example"
+  - why: start compute the lab never uses
+    action: ec2:RunInstances
+    resource: "arn:{partition}:ec2:{region}:{account}:instance/*"
+  - why: switch off the audit trail
+    action: cloudtrail:StopLogging
+    resource: "arn:{partition}:cloudtrail:{region}:{account}:trail/example"
+  - why: delete the lab's queue out from under the harness
+    action: sqs:DeleteQueue
+    resource: "arn:{partition}:sqs:{region}:{account}:{stack}-Downloads-example"
+  - why: delete the stack directly instead of through cdk destroy
+    action: cloudformation:DeleteStack
+    resource: "arn:{partition}:cloudformation:{region}:{account}:stack/{stack}/example"
+  - why: read another lab's or another team's bucket
+    action: s3:ListBucket
+    resource: "arn:{partition}:s3:::someone-elses-bucket"
