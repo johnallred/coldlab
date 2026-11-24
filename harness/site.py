@@ -22,7 +22,7 @@ import json
 import os
 from pathlib import Path
 
-from harness import report, tolerance
+from harness import publish, report, tolerance
 
 ROOT = Path(__file__).resolve().parents[1]
 #: The repository the page links to. In GitHub Actions, GITHUB_REPOSITORY names
@@ -141,6 +141,33 @@ def tolerance_section(records: list[dict]) -> list[str]:
     return out + [f"<p>Observed: {esc(seen)}.</p>"]
 
 
+def publishing_section(records: list[dict], lab: str = "sqs-retry") -> list[str]:
+    """Which version learners get, and what the newest one still needs."""
+    channels = publish.load_channels(ROOT, lab)
+    state = publish.assess(records, channels, publish.lab_version(ROOT, lab))
+    prod = channels.get("prod")
+    out = ["<h2>Published to learners</h2>",
+           "<p>Learners get a frozen copy of the lab, not whatever is on <code>main</code>. "
+           "A new version is promoted only after "
+           f"{publish.PROMOTE_AFTER} consecutive passing runs against that exact content, "
+           "so an edit that breaks the lab fails here first and never reaches a learner.</p>",
+           "<ul>"]
+    if prod:
+        copy = f"{REPO}/tree/main/published/{lab}/{prod['version']}"
+        out.append(f'<li>Published: <a href="{copy}"><code>{esc(prod["version"])}</code></a>, '
+                   f"promoted {esc(prod['promoted_at'][:10])} ({esc(prod['reason'])}).</li>")
+    else:
+        out.append("<li>Published: nothing yet. Versions are recorded from the first nightly "
+                   "run after versioning began; earlier runs carry no version and count for "
+                   "nothing.</li>")
+    if state["current"] != state["prod"]:
+        out.append(f"<li>On <code>main</code>: <code>{esc(state['current'])}</code>, "
+                   f"{state['current_passes']} of {publish.PROMOTE_AFTER} passing runs.</li>")
+    if state["advice"]:
+        out.append(f"<li><b>Published version failing:</b> {esc(state['advice'])}.</li>")
+    return out + ["</ul>"]
+
+
 def runs_table(records: list[dict], notes: dict[str, str] | None = None) -> list[str]:
     notes = notes or {}
     out = ["<h2>Every run</h2>", "<table>",
@@ -149,7 +176,7 @@ def runs_table(records: list[dict], notes: dict[str, str] | None = None) -> list
            f'<a href="{REPO}/blob/main/health/notes.json">health/notes.json</a>; '
            "everything else is generated.</caption>",
            "<thead><tr><th scope=col>Started (UTC)</th><th scope=col>Result</th>"
-           "<th scope=col>Duration</th><th scope=col>Redrive</th>"
+           "<th scope=col>Duration</th><th scope=col>Version</th><th scope=col>Redrive</th>"
            "<th scope=col>Failed checks</th><th scope=col>Stopped by</th></tr></thead><tbody>"]
     for r in sorted(records, key=lambda r: r["started_at"], reverse=True):
         result = ('<span class="ok">✓ passed</span>' if r.get("passed")
@@ -163,11 +190,12 @@ def runs_table(records: list[dict], notes: dict[str, str] | None = None) -> list
         out.append(
             f"<tr><td>{esc(r['started_at'][:16].replace('T', ' '))}</td><td>{result}</td>"
             f"<td class=n>{'' if seconds is None else f'{seconds:.0f}s'}</td>"
+            f"<td><code>{esc(r.get('lab_version') or '')}</code></td>"
             f"<td class=n>{'' if redrive is None else f'{redrive:.0f}s'}</td>"
             f"<td>{checks}</td><td>{esc(first_line(r.get('error')))}</td></tr>")
         note = notes.get(r["started_at"])
         if note:
-            out.append(f'<tr class=note><td></td><td colspan=5><b>What happened</b> '
+            out.append(f'<tr class=note><td></td><td colspan=6><b>What happened</b> '
                        f'<small>(note, written by hand)</small>: {esc(note)}</td></tr>')
     return out + ["</tbody></table>"]
 
@@ -211,6 +239,7 @@ def render(records: list[dict], notes: dict[str, str] | None = None) -> str:
         body.append("<p>No runs recorded yet.</p>")
     else:
         body += tiles(summary, records)
+        body += publishing_section(records)
         body += flaky_section(summary)
         body += tolerance_section(records)
         body += runs_table(records, notes)

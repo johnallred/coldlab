@@ -77,6 +77,8 @@ gets blamed on the student.
 | `.github/workflows/harness-tests.yml` | The harness's tests, on every pull request, with no AWS |
 | `.github/workflows/lab-health.yml` | The nightly run against real AWS, which appends to the record |
 | `harness/site.py` | Generates the public health page from the record |
+| `harness/publish.py` | Versions the lab by content and promotes a version to learners on evidence |
+| `published/` | Frozen copies of each published lab version, and which one learners get |
 | `health/notes.json` | Hand-written notes explaining particular runs, shown on the page as notes |
 | `.github/workflows/pages.yml` | Publishes that page to GitHub Pages after every nightly run |
 
@@ -104,7 +106,7 @@ python -m harness.report           # regenerate HEALTH.md and the README's figur
 python -m harness.phases           # regenerate the README's phase status
 python -m harness.tolerance        # can the redrive advisory be promoted yet?
 
-python -m unittest discover -s harness/tests -t .   # 166 tests, no AWS needed
+python -m unittest discover -s harness/tests -t .   # 174 tests, no AWS needed
 ```
 
 `python -m harness.run` needs the `aws` and `cdk` CLIs and working
@@ -169,6 +171,25 @@ not a failure, since that is what the receive count advisory got.
 This is the concrete reason the scheduled run matters. The first three
 observations came from a two-hour window on one machine, so a band drawn from
 them would describe that window rather than the lab.
+
+## Publishing to learners
+
+The nightly run tests whatever is on `main`; learners should not get that. A
+lab version is a hash of the files a learner uses (the lab document and the
+stack it deploys, not the harness or `expected.yaml`), every run records the
+version it tested, and `python -m harness.publish promote` copies a version into
+`published/` only after three consecutive passing runs against that exact
+content. The nightly workflow runs it after each run, so promotion happens on
+evidence without anyone deciding it, and `published/sqs-retry/channels.json`
+records which version learners get and why. `python -m harness.publish rollback
+REASON` points learners back at the previous copy.
+
+Because a version must pass before it is published, a published version that
+later fails has already passed with the same content: the environment changed,
+and rolling back would not help. `python -m harness.publish status` says which
+of the two cases a failure is. Runs recorded before versioning began carry no
+version and count for nothing, so the first promotion waits for three nightly
+runs.
 
 ## The lab document is the step list
 

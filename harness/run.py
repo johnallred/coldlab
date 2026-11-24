@@ -22,7 +22,7 @@ from pathlib import Path
 
 import yaml
 
-from harness import arns, checks, parse, phases, report
+from harness import arns, checks, parse, phases, publish, report
 from harness.shell import Timeout, poll_until, run
 from harness.steps import KNOWN_CONDITIONS, lab_steps
 
@@ -271,6 +271,9 @@ def main(argv=None) -> int:
         "seconds": round(seconds, 1),
         "passed": passed,
         "lab": args.lab,
+        # The content this run tested. Evidence for publishing is counted per
+        # version, so a pass of last week's lab says nothing about today's.
+        "lab_version": publish.lab_version(ROOT, args.lab),
         "region": args.region,
         # Whether this run came from the scheduled workflow rather than a
         # laptop. harness/phases.py derives Phase 4's status from it, so that

@@ -16,6 +16,8 @@ on:
     paths:
       - health/health.jsonl
       - health/notes.json
+      - published/**
+      - harness/publish.py
       - harness/site.py
       - harness/report.py
       - harness/tolerance.py
