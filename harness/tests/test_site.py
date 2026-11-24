@@ -85,5 +85,23 @@ class TestBuildFromTheRealRecord(unittest.TestCase):
         self.assertNotIn("<script", page)
 
 
+class TestNotes(unittest.TestCase):
+    def test_a_note_appears_under_its_run_and_is_labelled(self):
+        records = [record(1, False, 19, error="boom")]
+        page = text(site.render(records, {records[0]["started_at"]: "Fixed <soon>."}))
+        self.assertIn("What happened (note, written by hand) : Fixed &lt;soon&gt;.", page)
+
+    def test_every_committed_note_belongs_to_a_recorded_run(self):
+        """A note for a run that is not in the record is a claim about nothing."""
+        runs = {r["started_at"] for r in report.load_records(ROOT / "health" / "health.jsonl")}
+        notes = site.load_notes(ROOT / "health" / "notes.json")
+        self.assertTrue(notes, "no notes loaded, so this check is checking nothing")
+        self.assertEqual(sorted(set(notes) - runs), [])
+
+    # Deliberately no test that every failed run has a note: the nightly run
+    # executes these tests before the lab, so such a test would turn the first
+    # unexplained failure into a skipped run. Notes are added after the fact.
+
+
 if __name__ == "__main__":
     unittest.main()

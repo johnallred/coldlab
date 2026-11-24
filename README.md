@@ -76,6 +76,7 @@ gets blamed on the student.
 | `.github/workflows/harness-tests.yml` | The harness's tests, on every pull request, with no AWS |
 | `.github/workflows/lab-health.yml` | The nightly run against real AWS, which appends to the record |
 | `harness/site.py` | Generates the public health page from the record |
+| `health/notes.json` | Hand-written notes explaining particular runs, shown on the page as notes |
 | `.github/workflows/pages.yml` | Publishes that page to GitHub Pages after every nightly run |
 
 ## The lab
@@ -102,7 +103,7 @@ python -m harness.report           # regenerate HEALTH.md and the README's figur
 python -m harness.phases           # regenerate the README's phase status
 python -m harness.tolerance        # can the redrive advisory be promoted yet?
 
-python -m unittest discover -s harness/tests -t .   # 163 tests, no AWS needed
+python -m unittest discover -s harness/tests -t .   # 165 tests, no AWS needed
 ```
 
 `python -m harness.run` needs the `aws` and `cdk` CLIs and working

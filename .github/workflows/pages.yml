@@ -15,6 +15,7 @@ on:
     branches: [main]
     paths:
       - health/health.jsonl
+      - health/notes.json
       - harness/site.py
       - harness/report.py
       - harness/tolerance.py

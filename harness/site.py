@@ -9,7 +9,8 @@ what each recorded run did. GitHub Pages publishes it after every nightly run.
 Every figure comes from `health/health.jsonl` through `report.summarize` and
 `tolerance.assess`, the same functions that write HEALTH.md and the README
 block, so the page cannot disagree with them. There is no hand-written number
-on it. This project has watched hand-kept claims about its own record go stale
+on it. The one hand-written part, a note explaining a run, comes from
+`health/notes.json` and is labelled as a note wherever it appears. This project has watched hand-kept claims about its own record go stale
 within three runs; a page that quotes the record must be generated from it.
 """
 
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 from pathlib import Path
 
 from harness import report, tolerance
@@ -44,8 +46,18 @@ th, td { border-bottom: 1px solid #d0d7de; padding: .35rem .5rem; text-align: le
 td.n { text-align: right; font-variant-numeric: tabular-nums; }
 .ok { color: var(--ok); } .bad { color: var(--bad); } .na { color: var(--muted); }
 .grid td { text-align: center; } code { font-size: .85em; }
+tr.note td { border-top: 0; padding-top: 0; color: inherit; font-size: .85rem; }
 footer { color: var(--muted); font-size: .85rem; margin-top: 3rem; }
 """
+
+
+def load_notes(path: str | Path) -> dict[str, str]:
+    """Hand-written notes keyed by a run's started_at. Missing file, no notes."""
+    path = Path(path)
+    if not path.exists():
+        return {}
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return {k: str(v) for k, v in raw.items() if not k.startswith("_")}
 
 
 def esc(value: object) -> str:
@@ -125,10 +137,13 @@ def tolerance_section(records: list[dict]) -> list[str]:
     return out + [f"<p>Observed: {esc(seen)}.</p>"]
 
 
-def runs_table(records: list[dict]) -> list[str]:
+def runs_table(records: list[dict], notes: dict[str, str] | None = None) -> list[str]:
+    notes = notes or {}
     out = ["<h2>Every run</h2>", "<table>",
            "<caption>Newest first. Failing advisory checks are listed but do not "
-           "fail a run.</caption>",
+           "fail a run. Notes are written by hand in "
+           f'<a href="{REPO}/blob/main/health/notes.json">health/notes.json</a>; '
+           "everything else is generated.</caption>",
            "<thead><tr><th scope=col>Started (UTC)</th><th scope=col>Result</th>"
            "<th scope=col>Duration</th><th scope=col>Redrive</th>"
            "<th scope=col>Failed checks</th><th scope=col>Stopped by</th></tr></thead><tbody>"]
@@ -146,6 +161,10 @@ def runs_table(records: list[dict]) -> list[str]:
             f"<td class=n>{'' if seconds is None else f'{seconds:.0f}s'}</td>"
             f"<td class=n>{'' if redrive is None else f'{redrive:.0f}s'}</td>"
             f"<td>{checks}</td><td>{esc(first_line(r.get('error')))}</td></tr>")
+        note = notes.get(r["started_at"])
+        if note:
+            out.append(f'<tr class=note><td></td><td colspan=5><b>What happened</b> '
+                       f'<small>(note, written by hand)</small>: {esc(note)}</td></tr>')
     return out + ["</tbody></table>"]
 
 
@@ -169,7 +188,7 @@ def grid(records: list[dict]) -> list[str]:
     return out + ["</tbody></table>"]
 
 
-def render(records: list[dict]) -> str:
+def render(records: list[dict], notes: dict[str, str] | None = None) -> str:
     summary = report.summarize(records)
     body = [
         "<h1>coldlab lab health</h1>",
@@ -190,7 +209,7 @@ def render(records: list[dict]) -> str:
         body += tiles(summary, records)
         body += flaky_section(summary)
         body += tolerance_section(records)
-        body += runs_table(records)
+        body += runs_table(records, notes)
         body += grid(records)
         first = min(r["started_at"] for r in records)[:10]
         last = max(r["started_at"] for r in records)[:16].replace("T", " ")
@@ -206,20 +225,22 @@ def render(records: list[dict]) -> str:
             + "\n".join(body) + "\n</main>\n</body>\n</html>\n")
 
 
-def build(records: list[dict], out: str | Path) -> Path:
+def build(records: list[dict], out: str | Path,
+          notes: dict[str, str] | None = None) -> Path:
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     page = out / "index.html"
-    page.write_text(render(records), encoding="utf-8")
+    page.write_text(render(records, notes), encoding="utf-8")
     return page
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--record", default=str(ROOT / "health" / "health.jsonl"))
+    parser.add_argument("--notes", default=str(ROOT / "health" / "notes.json"))
     parser.add_argument("--out", default=str(ROOT / "_site"))
     args = parser.parse_args(argv)
-    page = build(report.load_records(args.record), args.out)
+    page = build(report.load_records(args.record), args.out, load_notes(args.notes))
     print(f"wrote {page}")
     return 0
 

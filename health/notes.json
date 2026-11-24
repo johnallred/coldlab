@@ -1,0 +1,6 @@
+{
+  "_about": "Written by hand. One note per run that needs explaining, keyed by the run's started_at in health.jsonl. The health page shows these labelled as notes, apart from the generated figures. A key that matches no run fails the tests.",
+  "2026-11-19T23:00:35+00:00": "The first run deployed to us-east-1 instead of us-east-2, because the region came from the credentials rather than the project, and an organisation policy refused it. The lab never started. Fixed: the harness now sets the region itself.",
+  "2026-11-23T21:22:32+00:00": "A harness bug, not a lab failure. The lab checks that a file never landed by listing an empty S3 folder, and aws s3 ls exits 1 when the folder is empty, which is the success case. The harness treated every non-zero exit as failure. Fixed: the lab document now declares the exit codes that mean success.",
+  "2026-11-23T21:31:33+00:00": "The run passed. The advisory check expected an exact receive count of 5, measured by hand, and this run saw 4. Both are legal, so the exact check was retired; a floor of maxReceiveCount + 1 gates instead, and the values seen so far are kept as a drift detector."
+}
