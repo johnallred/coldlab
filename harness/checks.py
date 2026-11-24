@@ -16,6 +16,42 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+#: What would have to be true to make `timing.redrive_within_tolerance` a
+#: gating check. Written as data rather than as a note saying "use a figure
+#: taken from recorded runs", because a note that defers to judgment is a note
+#: nobody actions, and because the numbers then live in exactly one place.
+#:
+#: The thresholds are a judgment and not a measurement, which is worth saying
+#: plainly. Ten observations across seven distinct days is enough spread to
+#: see day-to-day variation rather than one afternoon's; the first three
+#: observations all came from a two-hour window on one machine, so a band
+#: drawn from them would describe that window. The margins are chosen to
+#: absorb the spread seen so far plus a cold-start outlier.
+#:
+#: What makes the criterion honest is not the numbers but the last two keys. A
+#: band that fires without a real cause may be widened once, and that widening
+#: is recorded. If it fires spuriously again the check is retired rather than
+#: widened a second time, because a gate widened repeatedly is a gate nobody
+#: reads. Retirement is a real outcome here and not a failure: the receive
+#: count advisory was retired by evidence, and this one may go the same way if
+#: the spread stays near 21% of the median or turns out to drift by weekday.
+#:
+#: `min_observations` counts observations, not nights. A run that aborts before
+#: the redrive records none, which is why five runs have produced three.
+REDRIVE_PROMOTION = {
+    "min_observations": 10,
+    "min_distinct_days": 7,
+    # The band is computed from the record: low = factor x the minimum
+    # observed, high = factor x the maximum observed. Never a multiple of the
+    # derived nominal, which is what the current advisory band is and why it
+    # is six times wider than the observed spread.
+    "band_low_factor": 0.6,
+    "band_high_factor": 1.6,
+    "widenings_allowed": 1,
+    "after_a_second_spurious_failure": "retire",
+}
+
+
 @dataclass
 class Check:
     name: str
@@ -101,9 +137,12 @@ def failure_path(expected: dict, obs: dict) -> list[Check]:
         0.5 * nominal <= observed <= 3.0 * nominal,
         f"{0.5 * nominal:.0f}-{3.0 * nominal:.0f}s", round(observed, 1),
         gating=False,
-        note="Advisory, and wide on purpose. Lambda cold start and SQS "
-             "polling both add variance. Promote only with a tolerance taken "
-             "from recorded runs rather than from this guess.",
+        note="Advisory, and wide on purpose: Lambda cold start and SQS "
+             "polling both add variance. The criterion for promoting it is "
+             "REDRIVE_PROMOTION in this module, as data rather than as "
+             "judgment: 10 observations over 7 distinct days, the band "
+             "computed from the record, one widening permitted and recorded, "
+             "then retirement rather than a second widening.",
     ))
 
     return checks

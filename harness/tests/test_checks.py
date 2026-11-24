@@ -150,11 +150,39 @@ class TestAdvisoryChecksDoNotGate(unittest.TestCase):
         self.assertIn(timing, failures)
 
     def test_every_advisory_names_its_promotion_criterion(self):
+        """An advisory must say what would make it gating, or say never.
+
+        Matched on the stem rather than a literal spelling: the first version
+        of this test looked for "romote" and failed on a note that said
+        "promoting", which tested a spelling rather than the thing it cares
+        about.
+        """
         results = checks.failure_path(EXPECTED, MEASURED_FAILURE)
         for check in results:
-            if not check.gating:
-                self.assertIn("romote", check.note,
-                              f"{check.name} is advisory with no stated path to gating")
+            if check.gating:
+                continue
+            self.assertRegex(
+                check.note, r"promot",
+                f"{check.name} is advisory with no stated path to gating")
+
+    def test_the_redrive_criterion_is_data_rather_than_prose(self):
+        # A criterion written as a sentence telling a reader to use their
+        # judgment is a criterion nobody actions. These are the numbers the
+        # decision reads, and they live in one place.
+        criterion = checks.REDRIVE_PROMOTION
+        self.assertGreaterEqual(criterion["min_observations"], 10)
+        self.assertGreaterEqual(criterion["min_distinct_days"], 7)
+        self.assertLess(criterion["band_low_factor"], 1)
+        self.assertGreater(criterion["band_high_factor"], 1)
+        # The clause that keeps the numbers honest.
+        self.assertEqual(criterion["widenings_allowed"], 1)
+        self.assertEqual(criterion["after_a_second_spurious_failure"], "retire")
+
+    def test_the_advisory_note_points_at_the_criterion(self):
+        results = checks.failure_path(EXPECTED, MEASURED_FAILURE)
+        timing = next(c for c in results
+                      if c.name == "timing.redrive_within_tolerance")
+        self.assertIn("REDRIVE_PROMOTION", timing.note)
 
 
 if __name__ == "__main__":

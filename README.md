@@ -91,7 +91,7 @@ python -m harness.run              # provision, run, assert, tear down, record
 python -m harness.run --keep       # leave it running, for debugging
 python -m harness.report           # regenerate health/HEALTH.md
 
-python -m unittest discover -s harness/tests -t .   # 128 tests, no AWS needed
+python -m unittest discover -s harness/tests -t .   # 130 tests, no AWS needed
 ```
 
 `python -m harness.run` needs the `aws` and `cdk` CLIs and working
@@ -141,12 +141,21 @@ marked never to be promoted, and the floor of `maxReceiveCount + 1` is what
 gates. **An advisory check retired by evidence is the mechanism working, not a
 climbdown.**
 
-The redrive timing is still advisory because its tolerance is a guess rather
-than a figure taken from recorded runs. Every observation is recorded in
-`lab/sqs-retry/expected.yaml` under `redrive_observed_seconds`, and a handful
-of runs is too thin a basis for a band. That is the concrete reason the
-scheduled run matters: it is what turns a guessed tolerance into a measured
-one.
+The redrive timing is still advisory because its band is a multiple of the
+derived nominal rather than a figure taken from the record, which makes it
+about six times wider than the spread actually observed. Every run records its
+own timing in [`health/health.jsonl`](health/health.jsonl).
+
+What would have to be true to promote it is written as data in
+`harness/checks.py`, under `REDRIVE_PROMOTION`, rather than as a note telling a
+future reader to use their judgment: ten observations across seven distinct
+days, the band computed from the record, one widening permitted and recorded,
+then retirement rather than a second widening. Retirement is a real outcome and
+not a failure, since that is what the receive count advisory got.
+
+This is the concrete reason the scheduled run matters. The first three
+observations came from a two-hour window on one machine, so a band drawn from
+them would describe that window rather than the lab.
 
 ## The lab document is the step list
 
