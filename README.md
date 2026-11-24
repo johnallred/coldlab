@@ -238,6 +238,16 @@ resource name and needs no billing access.
 | **AWS total** | | | **~$0.00003** |
 | CI runner | 8.5 minutes, Linux 2-core | $0.006 per minute | **$0.051** |
 
+**The unit prices carry caveats, and they travel with these figures.** AWS's
+pricing pages did not render their rate tables when checked on 2026-11-23. The
+Lambda rates come from the worked examples on the Lambda pricing page, which
+are stated for US East (N. Virginia), not Ohio, where this lab runs. The SQS
+rate is the page's high-volume floor of $0.24 per million, so the SQS line is
+understated: the first paid tier is higher. The runner rate is GitHub's listed
+price for a standard Linux 2-core runner, and standard runners are free in
+public repositories. None of this changes the conclusion, because the runner
+dominates by three orders of magnitude. Quote the ratio if quoting one thing.
+
 **The runner costs about seventeen hundred times the AWS resources.** Every
 instinct says optimize the lab's infrastructure; the arithmetic says the
 infrastructure is free and the wall clock is the bill.
