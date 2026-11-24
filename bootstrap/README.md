@@ -1,6 +1,6 @@
 # bootstrap
 
-**Account `111122223333`, region `us-east-2`.** Every command below assumes
+**Your account (written as the placeholder `111122223333`), region `us-east-2`.** Every command below assumes
 that region. The CloudFormation templates take the account from
 `AWS::AccountId` rather than hard-coding it, so nothing here has to be edited
 if the account changes.

@@ -7,7 +7,9 @@ for you: it all needs AWS credentials, which the assistant has no access to.
 Work top to bottom. Each step says what success looks like. If a step's check
 does not match, stop there rather than continuing.
 
-**Target:** account `111122223333`, region `us-east-2`.
+**Target:** your own account, region `us-east-2`. Account IDs below are written
+as the documentation placeholder `111122223333`; substitute yours, which
+`aws sts get-caller-identity` prints.
 
 ---
 
