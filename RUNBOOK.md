@@ -1,8 +1,8 @@
 # Runbook: getting coldlab deployed
 
-Everything here runs on your Mac, in Bash, from
-`/Users/johnallred/vscode_projects/coldlab`. Nothing in this file can be run
-for you: it all needs AWS credentials, which the assistant has no access to.
+Everything here runs in a Bash shell on macOS, Linux, or Windows through WSL,
+from the root of your clone of this repository. None of it runs in CI: it all
+needs AWS credentials for your own account, on your own machine.
 
 Work top to bottom. Each step says what success looks like. If a step's check
 does not match, stop there rather than continuing.
@@ -16,7 +16,7 @@ as the documentation placeholder `111122223333`; substitute yours, which
 ## Step 0. See what you already have
 
 ```bash
-cd /Users/johnallred/vscode_projects/coldlab
+cd coldlab        # the root of your clone, wherever you put it
 for c in aws cdk node python3 gh; do printf "%-8s " "$c"; command -v "$c" >/dev/null && "$c" --version 2>&1 | head -1 || echo "MISSING"; done
 ```
 
@@ -25,11 +25,23 @@ Write down which say MISSING. You need `aws`, `node`, `python3` and `cdk`.
 
 ## Step 1. Install what is missing
 
+On macOS, with Homebrew:
+
 ```bash
 brew install awscli          # if aws was missing
 brew install node            # if node was missing
-npm install -g aws-cdk       # if cdk was missing
 brew install gh              # optional
+```
+
+On Linux or WSL, install the AWS CLI with
+[AWS's installer](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html),
+Node.js from your package manager or [nodejs.org](https://nodejs.org/), and
+`gh` from [cli.github.com](https://cli.github.com/) if you want it.
+
+Then, on any of them:
+
+```bash
+npm install -g aws-cdk       # if cdk was missing
 ```
 
 **Check:** re-run Step 0. Nothing says MISSING except possibly `gh`.
@@ -175,7 +187,7 @@ git add -A && git commit -m "Phase 0 and 1: account hygiene and the lab stack" &
 
 ## Step 6. A Python environment for CDK
 
-The CDK app is Python. This creates its environment on your Mac.
+The CDK app is Python. This creates its environment on your machine.
 
 ```bash
 python3 -m venv .venv
@@ -398,7 +410,7 @@ Steps 8 to 10 in one command, which is the whole point of Phase 2.
 From the repository root, with the Step 6 environment active:
 
 ```bash
-cd /Users/johnallred/vscode_projects/coldlab
+cd coldlab        # the root of your clone
 source .venv/bin/activate
 pip install -r harness/requirements.txt
 
