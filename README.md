@@ -18,9 +18,9 @@ describe does.
 ## Lab health
 
 <!-- health:start -->
-- Runs: **4**
-- Pass rate: **50%** (2 of 4)
-- Median duration: **426s**
+- Runs: **5**
+- Pass rate: **60%** (3 of 5)
+- Median duration: **453s**
 - Checks that have both passed and failed: `run.completed`
 
 Generated from [`health/health.jsonl`](health/health.jsonl) by `python -m harness.report`. Full table in [`health/HEALTH.md`](health/HEALTH.md).
