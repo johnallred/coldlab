@@ -85,6 +85,23 @@ class TestBuildFromTheRealRecord(unittest.TestCase):
         self.assertNotIn("<script", page)
 
 
+class TestRepositoryLinks(unittest.TestCase):
+    def test_a_copy_links_to_itself(self):
+        import importlib, os
+        old = os.environ.get("GITHUB_REPOSITORY")
+        os.environ["GITHUB_REPOSITORY"] = "someone/their-lab"
+        try:
+            page = importlib.reload(site).render([record(1, True, 400, a=True)])
+        finally:
+            if old is None:
+                os.environ.pop("GITHUB_REPOSITORY")
+            else:
+                os.environ["GITHUB_REPOSITORY"] = old
+            importlib.reload(site)
+        self.assertIn("https://github.com/someone/their-lab/blob/main/health/health.jsonl", page)
+        self.assertNotIn("johnallred", page)
+
+
 class TestNotes(unittest.TestCase):
     def test_a_note_appears_under_its_run_and_is_labelled(self):
         records = [record(1, False, 19, error="boom")]

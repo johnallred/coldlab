@@ -43,8 +43,12 @@ aws cloudformation deploy \
   --template-file bootstrap/oidc-role.yaml \
   --stack-name coldlab-oidc \
   --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides CreateOIDCProvider=yes
+  --parameter-overrides CreateOIDCProvider=yes \
+    SubjectClaim="repo:YOUR-OWNER/YOUR-REPO:ref:refs/heads/main"
 ```
+
+`SubjectClaim` has no default: it names the one repository and branch the role
+trusts. `RUNBOOK.md` Step 4 shows how to read your repository's exact claim.
 
 Take the role ARN from the output:
 

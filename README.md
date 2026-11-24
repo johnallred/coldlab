@@ -35,7 +35,8 @@ describe does.
 ## Lab health
 
 Published after every nightly run at
-**<https://johnallred.github.io/coldlab/>**, generated from the same record as
+**<https://johnallred.github.io/coldlab/>** (a copy of this repository
+publishes its own, on its own Pages site), generated from the same record as
 the figures below.
 
 <!-- health:start -->
@@ -103,7 +104,7 @@ python -m harness.report           # regenerate HEALTH.md and the README's figur
 python -m harness.phases           # regenerate the README's phase status
 python -m harness.tolerance        # can the redrive advisory be promoted yet?
 
-python -m unittest discover -s harness/tests -t .   # 165 tests, no AWS needed
+python -m unittest discover -s harness/tests -t .   # 166 tests, no AWS needed
 ```
 
 `python -m harness.run` needs the `aws` and `cdk` CLIs and working

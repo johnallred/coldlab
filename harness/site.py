@@ -19,12 +19,16 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 from pathlib import Path
 
 from harness import report, tolerance
 
 ROOT = Path(__file__).resolve().parents[1]
-REPO = "https://github.com/johnallred/coldlab"
+#: The repository the page links to. In GitHub Actions, GITHUB_REPOSITORY names
+#: whichever repository is running, so a copy of this project links to itself
+#: rather than to the original. Run locally, it falls back to the original.
+REPO = "https://github.com/" + os.environ.get("GITHUB_REPOSITORY", "johnallred/coldlab")
 
 #: Columns in the per-check grid. Older runs stay in the runs table and in the
 #: record; the grid is for spotting a pattern, and a pattern is recent.

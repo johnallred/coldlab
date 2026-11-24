@@ -136,24 +136,20 @@ That choice is made **once**, on the first deploy, and then never changed. If
 this stack created the provider, a later deploy passing `CreateOIDCProvider=no`
 deletes it. See the troubleshooting entry on tokens that cannot be validated.
 
-**In your own copy of this repository**, the role must trust your repository,
-not this one. The template's `SubjectClaim` default names
-`johnallred/coldlab`, and it is matched exactly, so a fork deployed with the
-default gets a role it can never assume. Find the exact claim your repository
-sends first: push your copy, open the `OIDC smoke` run in its Actions tab, and
-read the `sub = ...` line printed by the step called *Show the OIDC claims this
-run sends*. That step runs before the role is assumed, so it prints the claim
-even though the run then fails. Add it to the command below, and to every
-later command in this file that states `SubjectClaim`:
+**Which repository the role trusts.** The role trusts exactly one repository
+and branch, named by the `SubjectClaim` parameter, and the template has no
+default for it, so the deploy refuses to run until you state yours. Use the
+exact claim your repository's workflows send. To read it, push your copy of
+this repository, open the `OIDC smoke` run in its Actions tab, and find the
+`sub = ...` line printed by the step called *Show the OIDC claims this run
+sends*. That step runs before the role is assumed, so it prints the claim even
+though the run then fails.
 
-```bash
-  --parameter-overrides CreateOIDCProvider=yes \
-    SubjectClaim="repo:YOUR-OWNER/YOUR-REPO:ref:refs/heads/main"
-```
-
-Use the value exactly as printed. It may carry numeric ids after the names,
-such as `repo:owner@1234/repo@5678:...`, and then the plain form matches
-nothing.
+Use the value exactly as printed. It is either the plain form,
+`repo:OWNER/REPO:ref:refs/heads/main`, or a form with numeric ids after the
+names. This repository's, for example, is
+`repo:johnallred@7398042/coldlab@1463740861:ref:refs/heads/main`, and against
+that the plain form matches nothing.
 
 ```bash
 aws cloudformation deploy \
@@ -161,7 +157,8 @@ aws cloudformation deploy \
   --stack-name coldlab-oidc \
   --region us-east-2 \
   --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides CreateOIDCProvider=yes
+  --parameter-overrides CreateOIDCProvider=yes \
+    SubjectClaim="repo:YOUR-OWNER/YOUR-REPO:ref:refs/heads/main"
 ```
 
 **Check:** get the role ARN, and keep it for the next step.
@@ -496,9 +493,8 @@ hand afterwards.
 Phase 0's CI role deliberately had no permissions, because the smoke test only
 had to prove the trust relationship. A scheduled run has to deploy, so the role
 needs two policies. They are in `bootstrap/oidc-role.yaml`; redeploy with every
-parameter stated, because an omitted one resets to its default. The
-`SubjectClaim` below is this repository's; in your own copy, use the one you
-found in Step 4:
+parameter stated, because an omitted one resets to its default. Put in your
+own `SubjectClaim` from Step 4:
 
 ```bash
 aws cloudformation deploy \
@@ -508,7 +504,7 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
     CreateOIDCProvider=yes \
-    SubjectClaim="repo:johnallred@7398042/coldlab@1463740861:ref:refs/heads/main" \
+    SubjectClaim="repo:YOUR-OWNER/YOUR-REPO:ref:refs/heads/main" \
     CdkQualifier=hnb659fds \
     LabStackName=ColdlabSqsRetry \
     LabBucketPrefix=coldlabsqsretry
@@ -576,8 +572,8 @@ figures.
     --log | grep -A6 "claims this run sends"
   ```
 
-  Compare the `sub` line to the `SubjectClaim` parameter in
-  `bootstrap/oidc-role.yaml` character by character. GitHub can issue the
+  Compare the `sub` line to the `SubjectClaim` you deployed with,
+  character by character. GitHub can issue the
   subject with numeric owner and repository ids appended to their names, so a
   policy written against the plain names looks correct and matches nothing.
   This cost an hour the first time. The branch also has to be `main`, since the
@@ -596,8 +592,8 @@ figures.
   earlier deploy had created the provider: the condition went false,
   CloudFormation deleted the resource it owned, and the trust policy was left
   pointing at an ARN with nothing behind it. Restore it by redeploying with the
-  provider on and every other parameter stated explicitly (the `SubjectClaim`
-  shown is this repository's; use yours from Step 4):
+  provider on and every other parameter stated explicitly, with your
+  `SubjectClaim` from Step 4:
 
   ```bash
   aws cloudformation deploy \
@@ -605,7 +601,7 @@ figures.
     --stack-name coldlab-oidc --region us-east-2 \
     --capabilities CAPABILITY_NAMED_IAM \
     --parameter-overrides CreateOIDCProvider=yes \
-      SubjectClaim="repo:johnallred@7398042/coldlab@1463740861:ref:refs/heads/main"
+      SubjectClaim="repo:YOUR-OWNER/YOUR-REPO:ref:refs/heads/main"
   ```
 
   The general lesson is worth more than the fix: `aws cloudformation deploy`

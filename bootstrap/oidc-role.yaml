@@ -4,21 +4,22 @@ Description: >
   no permissions on purpose: Phase 0 proves authentication, not authorization.
 
 Parameters:
-  GitHubOwner:
-    Type: String
-    Default: johnallred
   GitHubRepo:
     Type: String
     Default: coldlab
-  GitHubBranch:
-    Type: String
-    Default: main
-    Description: Trust is scoped to this one branch. Widen deliberately, not by default.
+    Description: Used only in the role's name, coldlab-ci-<repo>.
   SubjectClaim:
     Type: String
-    Default: "repo:johnallred@7398042/coldlab@1463740861:ref:refs/heads/main"
+    AllowedPattern: "^repo:.+:ref:refs/heads/.+$"
+    ConstraintDescription: >
+      the exact sub claim your repository's workflow sends, such as
+      repo:owner/repo:ref:refs/heads/main; the OIDC smoke workflow prints it.
     Description: >
-      The exact `sub` claim GitHub sends, matched with StringEquals.
+      The exact `sub` claim GitHub sends, matched with StringEquals. It has no
+      default on purpose: it names the one repository and branch this role
+      trusts, so every copy of this project has to state its own, and a deploy
+      that forgets it fails instead of trusting someone else's repository.
+      The branch is part of the claim, so trust is scoped to one branch.
 
       Note the numeric ids. GitHub can issue the subject in an immutable form
       that appends the owner id and the repository id to their names, so the

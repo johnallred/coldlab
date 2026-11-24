@@ -9,7 +9,7 @@
   is wall clock, not cloud resources
 - `python -m harness.tolerance` answers the one open decision from the record;
   its verdict lands in HEALTH.md and the README every run
-- Identifiers scrubbed on write, swept repo-wide, gone from history. 165 tests
+- Identifiers scrubbed on write, swept repo-wide, gone from history. 166 tests
 - Public health page: `harness/site.py` generates it from the record;
   `.github/workflows/pages.yml` publishes it after each Lab health run
 
