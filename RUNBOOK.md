@@ -136,6 +136,25 @@ That choice is made **once**, on the first deploy, and then never changed. If
 this stack created the provider, a later deploy passing `CreateOIDCProvider=no`
 deletes it. See the troubleshooting entry on tokens that cannot be validated.
 
+**In your own copy of this repository**, the role must trust your repository,
+not this one. The template's `SubjectClaim` default names
+`johnallred/coldlab`, and it is matched exactly, so a fork deployed with the
+default gets a role it can never assume. Find the exact claim your repository
+sends first: push your copy, open the `OIDC smoke` run in its Actions tab, and
+read the `sub = ...` line printed by the step called *Show the OIDC claims this
+run sends*. That step runs before the role is assumed, so it prints the claim
+even though the run then fails. Add it to the command below, and to every
+later command in this file that states `SubjectClaim`:
+
+```bash
+  --parameter-overrides CreateOIDCProvider=yes \
+    SubjectClaim="repo:YOUR-OWNER/YOUR-REPO:ref:refs/heads/main"
+```
+
+Use the value exactly as printed. It may carry numeric ids after the names,
+such as `repo:owner@1234/repo@5678:...`, and then the plain form matches
+nothing.
+
 ```bash
 aws cloudformation deploy \
   --template-file bootstrap/oidc-role.yaml \
@@ -171,8 +190,9 @@ The second line is the check. It must end in `role/coldlab-ci-coldlab`. A
 truncated or wrong ARN here produces exactly the same failure as a wrong trust
 policy, and you will spend the next hour looking at the policy.
 
-Without `gh`: open `https://github.com/johnallred/coldlab/settings/variables/actions`,
-click **New repository variable**, name it `AWS_ROLE_ARN`, paste the ARN.
+Without `gh`: in your repository on GitHub, open **Settings → Secrets and
+variables → Actions → Variables**, click **New repository variable**, name it
+`AWS_ROLE_ARN`, and paste the ARN.
 
 It is a **variable**, not a secret. A role ARN is not sensitive; the trust
 policy is what protects it.
@@ -476,7 +496,9 @@ hand afterwards.
 Phase 0's CI role deliberately had no permissions, because the smoke test only
 had to prove the trust relationship. A scheduled run has to deploy, so the role
 needs two policies. They are in `bootstrap/oidc-role.yaml`; redeploy with every
-parameter stated, because an omitted one resets to its default:
+parameter stated, because an omitted one resets to its default. The
+`SubjectClaim` below is this repository's; in your own copy, use the one you
+found in Step 4:
 
 ```bash
 aws cloudformation deploy \
@@ -574,7 +596,8 @@ figures.
   earlier deploy had created the provider: the condition went false,
   CloudFormation deleted the resource it owned, and the trust policy was left
   pointing at an ARN with nothing behind it. Restore it by redeploying with the
-  provider on and every other parameter stated explicitly:
+  provider on and every other parameter stated explicitly (the `SubjectClaim`
+  shown is this repository's; use yours from Step 4):
 
   ```bash
   aws cloudformation deploy \
@@ -596,5 +619,20 @@ figures.
 
 ## What happens after this
 
-Phase 2 is the harness: a script that does Step 9 automatically, asserts the
-result, and tears down. Once Step 8 works, say so and it can be built.
+Nothing more to set up. From here the lab looks after itself, and the work is
+reading what it records:
+
+- **Every night** the `Lab health` workflow deploys the lab, runs it, checks it,
+  tears it down and commits the result to `health/health.jsonl`.
+- **The health page** at <https://johnallred.github.io/coldlab/> (or your own
+  repository's Pages site) is regenerated after each run. If it does not
+  appear, Pages needs turning on once: **Settings → Pages → Source: GitHub
+  Actions**, without choosing a suggested workflow, then run `Health page` by
+  hand from the Actions tab.
+- **When a run fails**, read why on that page or in the run's log. If the cause
+  is worth explaining to a reader, add a short note for that run to
+  `health/notes.json`, keyed by its `started_at`; the page shows it beside the
+  run, labelled as written by hand.
+- **The one open decision**, whether the redrive timing check should start
+  failing runs, is answered from the record by `python -m harness.tolerance`.
+  It needs about ten observations across seven days.
