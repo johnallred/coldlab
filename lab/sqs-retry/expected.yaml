@@ -35,9 +35,18 @@ failure_path:
   # derived 105 as the nominal figure and let the recorded runs set the
   # tolerance, rather than moving the nominal to chase one observation.
   redrive_after_seconds: 105
-  # 115s came from a run whose measurements were lost before that bug was
-  # fixed, so it is read off the log line rather than the record.
-  redrive_observed_seconds: [115, 147, 117]
+  # Observations are NOT listed here. Every run records its own
+  # redrive_seconds in health/health.jsonl, and a hand-kept copy beside it
+  # went stale within three runs: this list read [115, 147, 117] while the
+  # record held 147, 117 and 142. Measure once. Read the record:
+  #
+  #   python3 -c "import json; print([round(m['redrive_seconds']) for m in
+  #     (json.loads(l).get('measurements') or {} for l in
+  #      open('health/health.jsonl')) if m.get('redrive_seconds')])"
+  #
+  # The one observation not in the record is 115s, from a run that aborted
+  # before the fix that keeps partial measurements; it survives only in that
+  # run's log output.
 
   lands_in_bucket: false
 
@@ -58,9 +67,13 @@ failure_path:
     receive_count_on_first_read: 5
     receive_count_on_arrival: 4
 
-    # Three observations: 5 by hand on 2026-11-19, then 4 and 4 from the two
-    # passing harness runs on 2026-11-23. Same lab, same region, same
-    # maxReceiveCount.
+    # 5 measured by hand on 2026-11-19, and 4 on every automated run since.
+    # Same lab, same region, same maxReceiveCount. No count of runs here, so
+    # that this comment cannot go stale; health/health.jsonl has them all.
+    #
+    # Unlike the timings above, this list stays in this file because it is
+    # load-bearing: harness/checks.py uses it as the drift detector's set of
+    # values ever seen. It is an expectation, not an observation log.
     #
     # So 4 is the harness's consistent value and the hand run is the outlier.
     # A plausible explanation is that the hand run's earlier short poll did
