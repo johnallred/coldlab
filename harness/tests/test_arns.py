@@ -40,6 +40,39 @@ class TestResolveCommand(unittest.TestCase):
         self.assertIn("--role-name coldlab-ci-coldlab",
                       arns.resolve_command(arn, REGION))
 
+    def test_cloudformation_stack(self):
+        # lab_stack.py does Tags.of(self), so the stack itself carries the lab
+        # tags and a stale index can return its ARN after deletion. Without a
+        # resolver that reads as unresolved, which gates, and a nightly run
+        # would fail for no reason.
+        arn = ("arn:aws:cloudformation:us-east-2:111122223333:"
+               "stack/ColdlabSqsRetry/694973c0-e464-11f1-bae7-0affc45f4bb5")
+        self.assertEqual(
+            arns.resolve_command(arn, REGION),
+            "aws cloudformation describe-stacks "
+            "--stack-name ColdlabSqsRetry --region us-east-2",
+        )
+
+    def test_every_service_the_stack_tags_has_a_resolver(self):
+        """The audit that found the gap, kept as a test.
+
+        An unresolvable ARN is a gating failure by design, so a service the
+        stack tags but this module cannot answer is a false failure waiting
+        for the tag index to be stale at the wrong moment.
+        """
+        tagged = {
+            "sqs": "arn:aws:sqs:us-east-2:111122223333:ColdlabSqsRetry-Downloads",
+            "lambda-fn": "arn:aws:lambda:us-east-2:111122223333:function:ColdlabSqsRetry-Worker",
+            "lambda-esm": "arn:aws:lambda:us-east-2:111122223333:event-source-mapping:abc123",
+            "s3": "arn:aws:s3:::coldlabsqsretry-landingexample",
+            "logs": "arn:aws:logs:us-east-2:111122223333:log-group:/aws/lambda/ColdlabSqsRetry-Worker",
+            "iam": "arn:aws:iam::111122223333:role/ColdlabSqsRetry-WorkerRole",
+            "cloudformation": "arn:aws:cloudformation:us-east-2:111122223333:stack/ColdlabSqsRetry/abc",
+        }
+        missing = [label for label, arn in tagged.items()
+                   if arns.resolve_command(arn, REGION) is None]
+        self.assertEqual(missing, [])
+
     def test_unknown_service_is_unresolved_not_clean(self):
         # The safe default when a resolver is missing is "I could not check",
         # which checks.teardown counts as a failure.

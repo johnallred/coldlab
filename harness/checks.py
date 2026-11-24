@@ -13,7 +13,7 @@ and the only thing it does not do is set the exit code.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 #: What would have to be true to make `timing.redrive_within_tolerance` a

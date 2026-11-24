@@ -1,7 +1,9 @@
 name: OIDC smoke
 
 # Proves CI can obtain AWS credentials without any stored key. It asserts the
-# trust relationship only: the role has no permissions in Phase 0.
+# trust relationship and nothing else: `sts get-caller-identity` needs no
+# permissions, so this stays a pure authentication check even though the role
+# has since gained the two policies the scheduled run needs.
 
 on:
   push:

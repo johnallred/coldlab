@@ -1,38 +1,28 @@
 # HANDOFF
 
 ## Done
-- All five phases done, and that claim is now derived rather than typed:
-  `harness/phases.py` checks each phase's conditions against the repository and
-  `health/health.jsonl`, and CI fails if the README's block is stale
-- `python -m harness.run` provisions, runs the steps extracted from
-  `lab/sqs-retry/lab.md`, asserts, tears down, verifies, records. Passed three
-  times against real AWS, once from the scheduled workflow
-- Cost measured: ~$0.00003 of AWS per run against $0.051 of CI runner time. The
-  constraint is wall clock, not cloud resources. See the README
-- `harness/redact.py` scrubs identifiers on the way into the record;
-  `test_repo_hygiene.py` sweeps the repo for them. History was rewritten to
-  remove the account, organization and principal ids
-- 128 tests, no credentials needed
+- All five phases done, derived not typed: `harness/phases.py` checks each
+  against the repo and the record, and CI fails if the README block is stale
+- `python -m harness.run` provisions, runs the steps extracted from `lab.md`,
+  asserts, tears down, verifies, records. Three real passes, one from CI
+- Cost measured: AWS ~$0.00003 a run against $0.051 of CI time. The constraint
+  is wall clock, not cloud resources
+- `python -m harness.tolerance` answers the one open decision from the record;
+  its verdict lands in HEALTH.md and the README every run
+- Identifiers scrubbed on write, swept repo-wide, gone from history. 155 tests
 
 ## Failed / open
-- Runs. Five recorded, one from CI. The redrive tolerance stays advisory until
-  the record can set a band, which is the only thing left that time alone fixes
-- The receive count across a redrive is not determinate: 5 by hand, then 4, 4,
-  4. The advisory was retired rather than promoted; the floor gates
-- Both recorded failures predate the fix that keeps partial measurements, so
-  that fix is unit-tested but never exercised by a real failure
-- Not checkable from the repo, and so not claimed: whether the two bootstrap
-  stacks are deployed. `harness/phases.py` says so in the generated block
-- The warm-stack optimisation would cut the dominant cost and delete the
-  teardown verification that found the stale tag index. Named as a trade in the
-  README, deliberately unresolved
+- Waiting on runs: 3 observations on 1 day, criterion wants 10 across 7. A
+  scheduled task on 2026-11-30 reports promote, retire or wait
+- Receive count across a redrive is not determinate (5 by hand, then 4, 4, 4);
+  that advisory was retired, not promoted, and the floor gates
+- No cold-start test of this repo, the one thing it preaches and skips
+- Warm stack would cut the dominant cost and delete the teardown check that
+  found the stale tag index. Named in the README, deliberately unresolved
 
 ## Next
-Let the nightly accumulate, then promote the redrive tolerance from the record.
-Nothing else is outstanding against the scope.
+Let the nightly accumulate. The 2026-11-30 task decides. Nothing else is open.
 
 ## Why
-Four separate claims rotted in one afternoon: a phase status, a figure list, a
-prompt about a README section, and a hand scrub that missed what it was not
-looking for. Each is now generated or swept. A claim maintained by hand beside
-a system that already knows the answer rots at the speed the system runs.
+Seven claims rotted in a day: a phase status, a figure list, a prompt, two
+medians, a workflow comment, a hand scrub. Each is now generated or deleted.

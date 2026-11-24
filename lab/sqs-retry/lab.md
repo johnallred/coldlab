@@ -101,8 +101,11 @@ own backoff: 15 seconds, then 30, then 60.
 So the deliveries land at roughly t=0, t=15 and t=45, and the redrive happens
 when a fourth receive pushes the count past `maxReceiveCount`, at about t=105.
 
-Two minutes, not nine. Observed runs have taken 115 and 146 seconds, because
-Lambda cold starts and SQS's own polling add variance. If you check too early
+Two minutes, not nine. Real runs vary by half a minute or so either way,
+because Lambda cold starts and SQS's own polling both add variance, so treat
+two minutes as the shape of the answer rather than a stopwatch reading. Every
+run's actual timing is in `health/health.jsonl`; no figure is repeated here,
+because one typed beside a growing record goes stale. If you check too early
 you will see an empty dead-letter queue and conclude the lab is broken.
 
 ```bash

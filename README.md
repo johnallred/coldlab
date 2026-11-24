@@ -91,9 +91,12 @@ pip install -r harness/requirements.txt
 
 python -m harness.run              # provision, run, assert, tear down, record
 python -m harness.run --keep       # leave it running, for debugging
-python -m harness.report           # regenerate health/HEALTH.md
 
-python -m unittest discover -s harness/tests -t .   # 153 tests, no AWS needed
+python -m harness.report           # regenerate HEALTH.md and the README's figures
+python -m harness.phases           # regenerate the README's phase status
+python -m harness.tolerance        # can the redrive advisory be promoted yet?
+
+python -m unittest discover -s harness/tests -t .   # 155 tests, no AWS needed
 ```
 
 `python -m harness.run` needs the `aws` and `cdk` CLIs and working
@@ -247,7 +250,7 @@ resource name and needs no billing access.
 | Lambda requests | 14 invocations | $0.20 per million | $0.0000028 |
 | SQS requests | ~88 (78 measured, plus ~10 `GetQueueAttributes` the metrics do not count) | $0.24 per million | ~$0.000021 |
 | **AWS total** | | | **~$0.00003** |
-| CI runner | 8.5 minutes, Linux 2-core | $0.006 per minute | **$0.051** |
+| CI runner | 8.5 minutes of job time, Linux 2-core | $0.006 per minute | **$0.051** |
 
 **The unit prices carry caveats, and they travel with these figures.** AWS's
 pricing pages did not render their rate tables when checked on 2026-11-23. The
@@ -258,6 +261,11 @@ understated: the first paid tier is higher. The runner rate is GitHub's listed
 price for a standard Linux 2-core runner, and standard runners are free in
 public repositories. None of this changes the conclusion, because the runner
 dominates by three orders of magnitude. Quote the ratio if quoting one thing.
+
+Those 8.5 minutes are the whole CI job, which is longer than the harness's
+own run: checkout, a Python install, an npm install and the CDK CLI all bill as
+runner time. The harness's own duration, in the health figures above, is the
+smaller number inside it.
 
 **The runner costs about seventeen hundred times the AWS resources.** Every
 instinct says optimize the lab's infrastructure; the arithmetic says the
@@ -276,8 +284,10 @@ the stack exists. The lab sends two messages. So SQS cost tracks stack
 *lifetime*, not lab activity, and the same is true of the runner minutes.
 
 One lever moves both: keep a warm stack and reset it between runs instead of
-deploying and destroying each time. Most of the 453 seconds is `cdk deploy` and
-`cdk destroy`, not the lab.
+deploying and destroying each time. Most of a run is `cdk deploy` and
+`cdk destroy` rather than the lab. The median itself is in the health figures
+above rather than repeated here: a figure typed beside a generated one is
+wrong by the next night.
 
 That trade is not obviously worth taking, and the README should say so rather
 than recommend it. Deploy and destroy per run is what makes the teardown

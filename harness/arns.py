@@ -67,6 +67,22 @@ def resolve_command(arn: str, region: str) -> str | None:
             )
         return UNRESOLVED
 
+    if service == "cloudformation":
+        # `Tags.of(self)` in lab_stack.py tags the stack itself, so the stack's
+        # own ARN carries the lab tags and a stale index can return it after
+        # the stack is deleted. Without this resolver that reads as
+        # "unresolved", which gates, and a nightly run would fail for no
+        # reason. Found by auditing what the stack tags against what this
+        # module can answer, not by a run.
+        #
+        # arn:...:stack/<name>/<id>
+        kind, _, rest = resource.partition("/")
+        if kind == "stack":
+            name = rest.split("/")[0]
+            return (f"aws cloudformation describe-stacks --stack-name {name} "
+                    f"--region {region}")
+        return UNRESOLVED
+
     if service == "iam":
         kind, _, name = resource.partition("/")
         if kind == "role":
