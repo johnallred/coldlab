@@ -1,38 +1,38 @@
 # HANDOFF
 
 ## Done
-- All four phases built. `python -m harness.run` provisions, runs the steps
-  extracted from `lab/sqs-retry/lab.md`, asserts, tears down, verifies, and
-  records. Passed twice against real AWS (453s and 492s), all 11 checks green
-- Phase 3: `harness/extract.py` reads the lab document and refuses any document
-  that would weaken the test. The hardcoded step list is gone
-- Phase 4: `lab-health.yml` runs nightly at 09:17 UTC via OIDC, commits the
-  record back, and tears down in a safety step if the process is killed. The CI
-  role now has two scoped policies; both account-wide grants carry a comment
-  saying why they cannot be narrower
-- README health figures are generated from the record; CI fails if they are
-  stale. 98 tests pass with no credentials
+- All five phases done, and that claim is now derived rather than typed:
+  `harness/phases.py` checks each phase's conditions against the repository and
+  `health/health.jsonl`, and CI fails if the README's block is stale
+- `python -m harness.run` provisions, runs the steps extracted from
+  `lab/sqs-retry/lab.md`, asserts, tears down, verifies, records. Passed three
+  times against real AWS, once from the scheduled workflow
+- Cost measured: ~$0.00003 of AWS per run against $0.051 of CI runner time. The
+  constraint is wall clock, not cloud resources. See the README
+- `harness/redact.py` scrubs identifiers on the way into the record;
+  `test_repo_hygiene.py` sweeps the repo for them. History was rewritten to
+  remove the account, organization and principal ids
+- 128 tests, no credentials needed
 
 ## Failed / open
-- **The nightly workflow has never run.** Push and fire it by hand
-  (`gh workflow run lab-health.yml`) before trusting it. A failure there is
-  most likely a missing IAM permission; the error names the action
-- Redrive timing is still advisory: a handful of observations cannot set a
-  tolerance. Promoting it is what the scheduled runs are for
-- The receive count across a redrive is **not determinate**: 5 by hand, then 4
-  and 4. The advisory was retired rather than promoted; the floor gates
-- The tag query is an eventually-consistent index, so every ARN is resolved
-  against its owning service before anything counts as a leak
-- Both failed runs predate the fix that keeps partial measurements, so that fix
-  is unit-tested but never exercised by a real failure
-- Not built, deliberately: account vending, a second lab, a web dashboard, LMS
-  integration, multi-region. See `README.md`
+- Runs. Five recorded, one from CI. The redrive tolerance stays advisory until
+  the record can set a band, which is the only thing left that time alone fixes
+- The receive count across a redrive is not determinate: 5 by hand, then 4, 4,
+  4. The advisory was retired rather than promoted; the floor gates
+- Both recorded failures predate the fix that keeps partial measurements, so
+  that fix is unit-tested but never exercised by a real failure
+- Not checkable from the repo, and so not claimed: whether the two bootstrap
+  stacks are deployed. `harness/phases.py` says so in the generated block
+- The warm-stack optimisation would cut the dominant cost and delete the
+  teardown verification that found the stale tag index. Named as a trade in the
+  README, deliberately unresolved
 
 ## Next
-Fire the workflow once by hand. Then let a week accumulate and promote the
-redrive tolerance from what the record says rather than from arithmetic.
+Let the nightly accumulate, then promote the redrive tolerance from the record.
+Nothing else is outstanding against the scope.
 
 ## Why
-The scheduled run is the only part that cannot be hurried. Everything else
-proves the lab works once; this proves whether it keeps working, and records
-the answer whether or not anyone is watching.
+Four separate claims rotted in one afternoon: a phase status, a figure list, a
+prompt about a README section, and a hand scrub that missed what it was not
+looking for. Each is now generated or swept. A claim maintained by hand beside
+a system that already knows the answer rots at the speed the system runs.

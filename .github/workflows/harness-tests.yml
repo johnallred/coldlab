@@ -28,10 +28,13 @@ jobs:
       - name: Harness tests
         run: python -m unittest discover -s harness/tests -t . -v
 
-      # Both the table and the README's generated block come from the same
-      # record, so regenerating them must change nothing. A diff here means a
-      # figure was edited by hand, which is how a number starts lying.
-      - name: The generated health figures are not stale
+      # Every generated claim comes from the record or the repository, so
+      # regenerating must change nothing. A diff here means something was
+      # edited by hand, which is how a claim starts lying. The phase status is
+      # in this check because the README once asserted there was no nightly
+      # run while the run sat in the record.
+      - name: The generated figures and phase status are not stale
         run: |
           python -m harness.report
+          python -m harness.phases
           git diff --exit-code health/HEALTH.md README.md

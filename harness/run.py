@@ -15,13 +15,14 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 import yaml
 
-from harness import arns, checks, parse, report
+from harness import arns, checks, parse, phases, report
 from harness.shell import Timeout, poll_until, run
 from harness.steps import KNOWN_CONDITIONS, lab_steps
 
@@ -271,6 +272,11 @@ def main(argv=None) -> int:
         "passed": passed,
         "lab": args.lab,
         "region": args.region,
+        # Whether this run came from the scheduled workflow rather than a
+        # laptop. harness/phases.py derives Phase 4's status from it, so that
+        # "it runs on a schedule" is a fact about the record instead of a
+        # sentence someone typed into the README.
+        "ci": bool(os.environ.get("GITHUB_ACTIONS")),
         "error": error,
         "measurements": {k: v for k, v in measured.items() if k != "teardown"},
         "checks": [{"name": c.name, "ok": c.ok, "gating": c.gating,
@@ -282,6 +288,15 @@ def main(argv=None) -> int:
     report.append_record(health / "health.jsonl", record)
     summary = report.regenerate(health / "health.jsonl", health / "HEALTH.md",
                                 args.readme)
+    # A run can change a phase's status: the first CI run completes Phase 4,
+    # and a first failure completes one of Phase 2's conditions. Regenerate
+    # from the record rather than leaving the README to be edited later.
+    try:
+        phases.update_readme(args.readme, phases.assess(ROOT))
+    except ValueError:
+        # A README without the markers, which only happens in a test harness
+        # using a throwaway file. Not worth failing a real run over.
+        pass
 
     log("")
     log(f"  {'PASS' if passed else 'FAIL'} in {seconds:.0f}s  "
