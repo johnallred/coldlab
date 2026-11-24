@@ -46,6 +46,7 @@ gets blamed on the student.
 | `lab/sqs-retry/lab.md` | The student-facing lab. The harness runs these commands, it does not hold a copy |
 | `lab/sqs-retry/expected.yaml` | The observable results, every value tagged `measured` or `derived` |
 | `harness/` | Provision, run the lab's steps, assert, tear down, verify, record |
+| `harness/redact.py` | Scrubs account, organization and principal ids out of anything committed |
 | `health/` | One JSON record per run, and a generated table |
 | `.github/workflows/oidc-smoke.yml` | Proves CI can assume the role without stored credentials |
 | `.github/workflows/harness-tests.yml` | The harness's tests, on every pull request, with no AWS |
@@ -72,7 +73,7 @@ python -m harness.run              # provision, run, assert, tear down, record
 python -m harness.run --keep       # leave it running, for debugging
 python -m harness.report           # regenerate health/HEALTH.md
 
-python -m unittest discover -s harness/tests -t .   # 100 tests, no AWS needed
+python -m unittest discover -s harness/tests -t .   # 111 tests, no AWS needed
 ```
 
 `python -m harness.run` needs the `aws` and `cdk` CLIs and working

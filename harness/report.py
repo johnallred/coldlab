@@ -11,12 +11,21 @@ import json
 import statistics
 from pathlib import Path
 
+from harness.redact import scrub_record
+
 
 def append_record(path: str | Path, record: dict) -> None:
+    """Append one record, with identifiers scrubbed out of its strings.
+
+    This file is committed to a public repository and holds the raw text of
+    whatever failed, which is written by AWS rather than by us. Scrubbing here
+    rather than at the call sites means it cannot be forgotten for a field
+    nobody anticipated.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, sort_keys=True) + "\n")
+        handle.write(json.dumps(scrub_record(record), sort_keys=True) + "\n")
 
 
 def load_records(path: str | Path) -> list[dict]:

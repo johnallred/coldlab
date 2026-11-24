@@ -38,6 +38,8 @@ class TestFirstMessage(unittest.TestCase):
         "ReceiptHandle": "AQEBFqm2",
         "Body": '{"file":"invoice-8812.csv","fail_until":99}',
         "Attributes": {
+            # Redacted: the real value is an IAM unique id for this account.
+            # No parser reads this field.
             "SenderId": "AIDAEXAMPLEPRINCIPALID",
             "ApproximateFirstReceiveTimestamp": "1795126728517",
             "ApproximateReceiveCount": "5",

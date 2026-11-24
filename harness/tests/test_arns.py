@@ -29,10 +29,10 @@ class TestResolveCommand(unittest.TestCase):
                       arns.resolve_command(arn, REGION))
 
     def test_s3_bucket(self):
-        arn = "arn:aws:s3:::coldlabsqsretry-landingf95672e9"
+        arn = "arn:aws:s3:::coldlabsqsretry-landingexample"
         self.assertEqual(
             arns.resolve_command(arn, REGION),
-            "aws s3api head-bucket --bucket coldlabsqsretry-landingf95672e9",
+            "aws s3api head-bucket --bucket coldlabsqsretry-landingexample",
         )
 
     def test_iam_role(self):
