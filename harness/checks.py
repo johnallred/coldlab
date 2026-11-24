@@ -47,6 +47,12 @@ REDRIVE_PROMOTION = {
     # is six times wider than the observed spread.
     "band_low_factor": 0.6,
     "band_high_factor": 1.6,
+    # Above this, the timing is not determinate enough to assert at all and
+    # the check is retired rather than promoted, the way the receive count
+    # was. (max - min) / median, so the first three observations sit at 0.21.
+    # The threshold is a judgment like the rest; what it buys is that the
+    # retire outcome is decided by the record rather than by whoever looks.
+    "max_relative_spread": 0.5,
     "widenings_allowed": 1,
     "after_a_second_spurious_failure": "retire",
 }

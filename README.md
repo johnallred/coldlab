@@ -65,6 +65,7 @@ gets blamed on the student.
 | `harness/` | Provision, run the lab's steps, assert, tear down, verify, record |
 | `harness/redact.py` | Scrubs account, organization and principal ids out of anything committed |
 | `harness/phases.py` | Derives the phase status above from the repository and the record |
+| `harness/tolerance.py` | Answers whether the redrive advisory should be promoted, from the record |
 | `health/` | One JSON record per run, and a generated table |
 | `.github/workflows/oidc-smoke.yml` | Proves CI can assume the role without stored credentials |
 | `.github/workflows/harness-tests.yml` | The harness's tests, on every pull request, with no AWS |
@@ -91,7 +92,7 @@ python -m harness.run              # provision, run, assert, tear down, record
 python -m harness.run --keep       # leave it running, for debugging
 python -m harness.report           # regenerate health/HEALTH.md
 
-python -m unittest discover -s harness/tests -t .   # 130 tests, no AWS needed
+python -m unittest discover -s harness/tests -t .   # 146 tests, no AWS needed
 ```
 
 `python -m harness.run` needs the `aws` and `cdk` CLIs and working
