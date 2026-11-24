@@ -52,7 +52,10 @@ class TestVerdict(unittest.TestCase):
                    for i in range(12)]
         assessment = tolerance.assess(records)
         self.assertEqual(assessment.verdict, tolerance.WAIT)
-        self.assertTrue(any("distinct days" in r for r in assessment.reasons))
+        # Matched on "distinct" rather than "distinct days": the reason
+        # pluralises, and the first version of this assertion broke on the
+        # singular. Tests should match the thing, not its spelling.
+        self.assertTrue(any("distinct" in r for r in assessment.reasons))
 
     def test_a_tight_spread_over_enough_days_promotes(self):
         values = [120.0, 130.0, 125.0, 118.0, 135.0, 128.0, 122.0,

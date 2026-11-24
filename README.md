@@ -39,6 +39,7 @@ describe does.
 - Pass rate: **60%** (3 of 5)
 - Median duration: **453s**
 - Checks that have both passed and failed: `run.completed`
+- Redrive tolerance: **wait** (3 observations across 1 day)
 
 Generated from [`health/health.jsonl`](health/health.jsonl) by `python -m harness.report`. Full table in [`health/HEALTH.md`](health/HEALTH.md).
 <!-- health:end -->
@@ -92,7 +93,7 @@ python -m harness.run              # provision, run, assert, tear down, record
 python -m harness.run --keep       # leave it running, for debugging
 python -m harness.report           # regenerate health/HEALTH.md
 
-python -m unittest discover -s harness/tests -t .   # 146 tests, no AWS needed
+python -m unittest discover -s harness/tests -t .   # 153 tests, no AWS needed
 ```
 
 `python -m harness.run` needs the `aws` and `cdk` CLIs and working

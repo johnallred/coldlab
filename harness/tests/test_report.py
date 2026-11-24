@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from harness import report
+from harness import report, tolerance
 
 
 def record(run_id, passed, seconds, **check_outcomes):
@@ -158,6 +158,86 @@ class TestReadmeBlock(unittest.TestCase):
             report.update_readme(path, report.summarize([]))
             self.assertIn("No runs recorded yet",
                           path.read_text(encoding="utf-8"))
+
+
+class TestTheVerdictIsSurfaced(unittest.TestCase):
+    """The verdict has to appear without anyone remembering to ask for it."""
+
+    def observed(self, day, seconds, run_id):
+        return {"run_id": run_id, "started_at": f"{day}T00:00:00+00:00",
+                "seconds": 400.0, "passed": True, "ci": False,
+                "checks": [{"name": "a", "ok": True, "gating": True}],
+                "measurements": {"redrive_seconds": seconds}}
+
+    def waiting(self):
+        return [self.observed("2026-12-01", 120.0, "a"),
+                self.observed("2026-12-02", 130.0, "b")]
+
+    def promotable(self):
+        values = [120.0, 130.0, 125.0, 118.0, 135.0, 128.0, 122.0,
+                  131.0, 126.0, 124.0]
+        return [self.observed(f"2026-12-{i + 1:02d}", v, f"r{i}")
+                for i, v in enumerate(values)]
+
+    def test_health_md_carries_the_verdict(self):
+        text = report.render(report.summarize(self.waiting()), self.waiting())
+        self.assertIn("## Redrive tolerance", text)
+        self.assertIn("WAIT", text)
+
+    def test_the_readme_block_carries_it_too(self):
+        records = self.waiting()
+        block = report.readme_block(report.summarize(records), records)
+        self.assertIn("Redrive tolerance", block)
+        self.assertIn("wait", block)
+
+    def test_the_band_is_shown_when_the_verdict_is_promote(self):
+        records = self.promotable()
+        text = report.render(report.summarize(records), records)
+        block = report.readme_block(report.summarize(records), records)
+        self.assertIn("PROMOTE", text)
+        self.assertIn("Band the record supports", text)
+        self.assertIn("band ", block)
+
+    def test_the_two_surfaces_cannot_disagree(self):
+        # Both come from one tolerance.assess call, not from two readings.
+        records = self.promotable()
+        verdict = tolerance.assess(records)
+        text = report.render(report.summarize(records), records)
+        block = report.readme_block(report.summarize(records), records)
+        self.assertIn(verdict.verdict.upper(), text)
+        self.assertIn(verdict.verdict, block)
+        self.assertIn(f"{verdict.band[0]:.0f}-{verdict.band[1]:.0f}s", text)
+
+    def test_no_observations_means_no_verdict_section(self):
+        # Runs that aborted before the redrive leave nothing to assess, and a
+        # section saying so would be noise.
+        bare = [{"run_id": "a", "started_at": "2026-12-01T00:00:00+00:00",
+                 "seconds": 20.0, "passed": False, "checks": [],
+                 "measurements": {}}]
+        text = report.render(report.summarize(bare), bare)
+        self.assertNotIn("Redrive tolerance", text)
+        self.assertEqual(report.verdict_lines(bare), [])
+
+    def test_the_readme_block_works_without_records(self):
+        # The older two-argument call site must keep working.
+        block = report.readme_block(report.summarize(self.waiting()))
+        self.assertIn("Runs:", block)
+        self.assertNotIn("Redrive tolerance", block)
+
+    def test_regenerate_writes_the_verdict_through(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = Path(tmp) / "health.jsonl"
+            for r in self.waiting():
+                report.append_record(jsonl, r)
+            readme = Path(tmp) / "README.md"
+            readme.write_text(
+                f"# fake\n\n{report.README_START}\n{report.README_END}\n",
+                encoding="utf-8")
+            report.regenerate(jsonl, Path(tmp) / "HEALTH.md", readme)
+            self.assertIn("Redrive tolerance",
+                          readme.read_text(encoding="utf-8"))
+            self.assertIn("## Redrive tolerance",
+                          (Path(tmp) / "HEALTH.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import json
 import statistics
 from pathlib import Path
 
+from harness import tolerance
 from harness.redact import scrub_record
 
 
@@ -74,6 +75,31 @@ def summarize(records: list[dict]) -> dict:
     }
 
 
+def verdict_lines(records: list[dict]) -> list[str]:
+    """The redrive tolerance verdict, in two or three lines.
+
+    Generated here so it appears after every run rather than waiting for
+    somebody to remember to ask. A verdict nobody looks at is the same as no
+    verdict, and this project has four instances of a claim rotting because it
+    sat somewhere nobody regenerated.
+
+    Derived from `tolerance.assess`, never from a second reading of the
+    record, so the short form here and the full report cannot disagree.
+    """
+    assessment = tolerance.assess(records)
+    if not assessment.observations:
+        return []
+
+    lines = [f"**{assessment.verdict.upper()}.** "
+             + "; ".join(assessment.reasons) + "."]
+    if assessment.band:
+        low, high = assessment.band
+        lines.append(f"Band the record supports: **{low:.0f}-{high:.0f}s**.")
+    lines.append("`python -m harness.tolerance` prints every observation, "
+                 "what it does not decide, and the change to make.")
+    return lines
+
+
 def render(summary: dict, records: list[dict]) -> str:
     if not summary["runs"]:
         return ("# Lab health\n\nNo runs recorded yet. "
@@ -113,6 +139,12 @@ def render(summary: dict, records: list[dict]) -> str:
     else:
         lines += ["No check has both passed and failed yet.", ""]
 
+    verdict = verdict_lines(records)
+    if verdict:
+        lines += ["## Redrive tolerance", ""]
+        lines += verdict
+        lines.append("")
+
     lines += [
         "## Every check",
         "",
@@ -136,7 +168,7 @@ README_START = "<!-- health:start -->"
 README_END = "<!-- health:end -->"
 
 
-def readme_block(summary: dict) -> str:
+def readme_block(summary: dict, records: list[dict] | None = None) -> str:
     if not summary["runs"]:
         return ("No runs recorded yet. `python -m harness.run` writes the "
                 "first one.")
@@ -156,6 +188,17 @@ def readme_block(summary: dict) -> str:
     else:
         lines.append("- No check has both passed and failed")
 
+    if records:
+        assessment = tolerance.assess(records)
+        if assessment.observations:
+            detail = (f", band {assessment.band[0]:.0f}-"
+                      f"{assessment.band[1]:.0f}s" if assessment.band else "")
+            lines.append(
+                f"- Redrive tolerance: **{assessment.verdict}** "
+                f"({len(assessment.observations)} observations across "
+                f"{assessment.days} "
+                f"{'day' if assessment.days == 1 else 'days'}{detail})")
+
     lines.append("")
     lines.append("Generated from [`health/health.jsonl`](health/health.jsonl) "
                  "by `python -m harness.report`. Full table in "
@@ -163,7 +206,8 @@ def readme_block(summary: dict) -> str:
     return "\n".join(lines)
 
 
-def update_readme(path: str | Path, summary: dict) -> bool:
+def update_readme(path: str | Path, summary: dict,
+                  records: list[dict] | None = None) -> bool:
     """Replace the marked block. True when the file changed."""
     path = Path(path)
     text = path.read_text(encoding="utf-8")
@@ -177,7 +221,7 @@ def update_readme(path: str | Path, summary: dict) -> bool:
 
     before, _, rest = text.partition(README_START)
     _, _, after = rest.partition(README_END)
-    updated = (f"{before}{README_START}\n{readme_block(summary)}\n"
+    updated = (f"{before}{README_START}\n{readme_block(summary, records)}\n"
                f"{README_END}{after}")
 
     if updated == text:
@@ -192,7 +236,7 @@ def regenerate(jsonl: str | Path, markdown: str | Path,
     summary = summarize(records)
     Path(markdown).write_text(render(summary, records), encoding="utf-8")
     if readme is not None:
-        update_readme(readme, summary)
+        update_readme(readme, summary, records)
     return summary
 
 

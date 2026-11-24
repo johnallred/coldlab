@@ -14,6 +14,11 @@ lab, the harness, or an assumption about eventual consistency.
 
 - `run.completed` (1 of 4 runs failed)
 
+## Redrive tolerance
+
+**WAIT.** 3 observations, 10 needed; 1 distinct day, 7 needed.
+`python -m harness.tolerance` prints every observation, what it does not decide, and the change to make.
+
 ## Every check
 
 | Check | Gating | Runs | Failures | Failure rate |

@@ -26,7 +26,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from harness.checks import REDRIVE_PROMOTION
-from harness.report import load_records
+# Deliberately no module-level import of harness.report: report renders this
+# verdict into HEALTH.md, so importing it here would make a cycle. The one
+# place that needs load_records is __main__, which imports it late.
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -93,8 +95,9 @@ def assess(records: list[dict], criterion: dict | None = None) -> Assessment:
         short_of.append(
             f"{len(found)} observations, {criterion['min_observations']} needed")
     if assessment.days < criterion["min_distinct_days"]:
+        day_word = "day" if assessment.days == 1 else "days"
         short_of.append(
-            f"{assessment.days} distinct days, "
+            f"{assessment.days} distinct {day_word}, "
             f"{criterion['min_distinct_days']} needed")
 
     if short_of:
@@ -139,8 +142,9 @@ def render(assessment: Assessment, nominal: float | None = None) -> str:
         values = assessment.values
         lines.append("  observations")
         for o in sorted(assessment.observations, key=lambda o: o.run_id):
+            origin = "ci" if o.ci else "local"
             lines.append(f"    {o.day}  {o.seconds:6.1f}s  "
-                         f"{'ci' if o.ci else 'local'}  {o.run_id}")
+                         f"{origin:<5}  {o.run_id}")
         lines.append(f"    n={len(values)} days={assessment.days} "
                      f"min={min(values):.0f} max={max(values):.0f} "
                      f"median={statistics.median(values):.0f}")
@@ -177,6 +181,8 @@ def render(assessment: Assessment, nominal: float | None = None) -> str:
 
 if __name__ == "__main__":
     import yaml
+
+    from harness.report import load_records
 
     records = load_records(ROOT / "health" / "health.jsonl")
     expected = yaml.safe_load(
