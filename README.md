@@ -40,11 +40,11 @@ publishes its own, on its own Pages site), generated from the same record as
 the figures below.
 
 <!-- health:start -->
-- Runs: **6**
-- Pass rate: **67%** (4 of 6)
-- Median duration: **445s**
+- Runs: **7**
+- Pass rate: **71%** (5 of 7)
+- Median duration: **453s**
 - Checks that have both passed and failed: `run.completed`
-- Redrive tolerance: **wait** (4 observations across 2 days)
+- Redrive tolerance: **wait** (5 observations across 3 days)
 
 Generated from [`health/health.jsonl`](health/health.jsonl) by `python -m harness.report`. Full table in [`health/HEALTH.md`](health/HEALTH.md).
 <!-- health:end -->
